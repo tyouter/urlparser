@@ -1,0 +1,136 @@
+"""
+数据模型定义
+
+定义解析器的输入输出数据结构
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any
+from enum import Enum
+
+
+class PlatformType(Enum):
+    ZHIHU = "zhihu"
+    XIAOHONGSHU = "xiaohongshu"
+    BILIBILI = "bilibili"
+    YOUTUBE = "youtube"
+    WEIXIN = "weixin"
+    GITHUB = "github"
+    DRIBBBLE = "dribbble"
+    GENERIC = "default"
+
+
+class ContentType(Enum):
+    ARTICLE = "articles"
+    VIDEO = "videos"
+    WEBPAGE = "webpages"
+    IDEA = "ideas"
+
+
+@dataclass
+class ParserConfig:
+    use_user_chrome: bool = False
+    user_data_dir: Optional[str] = None
+    cookies_file: Optional[str] = None
+    timeout: int = 30000
+    headless: bool = True
+    scroll_enabled: bool = True
+    max_scrolls: int = 20
+    scroll_delay: float = 1.5
+    expand_full_text: bool = True
+    close_login_popup: bool = True
+    stealth_mode: bool = True
+
+    def to_dict(self) -> Dict:
+        return {
+            'use_user_chrome': self.use_user_chrome,
+            'user_data_dir': self.user_data_dir,
+            'cookies_file': self.cookies_file,
+            'timeout': self.timeout,
+            'headless': self.headless,
+            'scroll_enabled': self.scroll_enabled,
+            'max_scrolls': self.max_scrolls,
+            'scroll_delay': self.scroll_delay,
+            'expand_full_text': self.expand_full_text,
+            'close_login_popup': self.close_login_popup,
+            'stealth_mode': self.stealth_mode
+        }
+
+
+@dataclass
+class ParseResult:
+    url: str = ""
+    platform: str = ""
+    title: str = ""
+    content: str = ""
+    raw_text: str = ""
+    author: str = ""
+    publish_date: str = ""
+
+    video_specific: Dict[str, Any] = field(default_factory=dict)
+    article_specific: Dict[str, Any] = field(default_factory=dict)
+
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    source_path: Optional[str] = None
+    fetch_success: bool = False
+    error: Optional[str] = None
+
+    @property
+    def is_video(self) -> bool:
+        return self.platform in ['bilibili', 'youtube']
+
+    @property
+    def is_article(self) -> bool:
+        return self.platform in ['zhihu', 'weixin']
+
+    @property
+    def content_type(self) -> ContentType:
+        if self.is_video:
+            return ContentType.VIDEO
+        elif self.is_article:
+            return ContentType.ARTICLE
+        else:
+            return ContentType.WEBPAGE
+
+    @property
+    def content_length(self) -> int:
+        return len(self.content) + len(self.raw_text)
+
+    def to_dict(self) -> Dict:
+        return {
+            'url': self.url,
+            'platform': self.platform,
+            'title': self.title,
+            'content': self.content,
+            'raw_text': self.raw_text,
+            'author': self.author,
+            'publish_date': self.publish_date,
+            'video_specific': self.video_specific,
+            'article_specific': self.article_specific,
+            'metadata': self.metadata,
+            'source_path': self.source_path,
+            'fetch_success': self.fetch_success,
+            'error': self.error
+        }
+
+
+@dataclass
+class VideoInfo:
+    duration: str = ""
+    views: str = ""
+    likes: str = ""
+    coins: str = ""
+    favorites: str = ""
+    tags: str = ""
+    description: str = ""
+    subtitles: List[Dict] = field(default_factory=list)
+    transcription: str = ""
+    transcription_method: str = ""
+
+
+@dataclass
+class ArticleInfo:
+    votes: str = ""
+    comments: str = ""
+    category: str = ""
+    reading_count: str = ""

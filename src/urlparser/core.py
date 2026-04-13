@@ -1,0 +1,291 @@
+"""
+核心解析器 - 统一入口
+
+提供最简 API: parse(url) -> ParseResult
+
+整合 fetcher / parser / transcriber / storage 四大子包
+"""
+
+import asyncio
+import time
+from copy import deepcopy
+from typing import Optional, List, Dict, Any
+
+from .config import ParseConfig
+from .models import (
+    ParseResult, PlatformType, ContentType,
+    VideoMetadata, TranscriptionResult, create_result_from_parser,
+)
+from .parser import ParserFactory
+from .transcriber import FunASRTranscriber, WhisperTranscriber
+from .utils import detect_platform, is_video_url
+
+
+class UrlParser:
+    """
+    通用 URL 解析器
+
+    使用方式:
+        parser = UrlParser()
+        result = await parser.parse("https://www.bilibili.com/video/BVxxx")
+
+        # 带配置
+        parser = UrlParser(config=ParseConfig.with_transcribe())
+        result = await parser.parse(url)
+
+        # 批量解析
+        results = await parser.parse_batch(["url1", "url2"])
+    """
+
+    def __init__(self, config: Optional[ParseConfig] = None):
+        self.config = config or ParseConfig()
+        self._fetcher = None
+        self._transcriber = None
+
+    async def parse(
+        self,
+        url: str,
+        config: Optional[ParseConfig] = None,
+        **kwargs
+    ) -> ParseResult:
+        """
+        解析单个 URL（主入口）
+
+        Args:
+            url: 要解析的 URL
+            config: 可选配置（覆盖默认）
+            **kwargs: 快捷参数
+
+        Returns:
+            ParseResult 统一解析结果
+        """
+        cfg = config or self.config
+
+        if kwargs.get('enable_transcribe'):
+            cfg = deepcopy(cfg)
+            cfg.transcribe.enabled = True
+
+        if kwargs.get('cookies_file'):
+            cfg = deepcopy(cfg)
+            cfg.browser.cookies_file = kwargs['cookies_file']
+
+        if kwargs.get('use_user_chrome'):
+            cfg = deepcopy(cfg)
+            cfg.browser.use_user_chrome = True
+
+        start_time = time.time()
+
+        try:
+            result = await self._do_parse(url, cfg)
+            result.parse_time = round(time.time() - start_time, 2)
+            return result
+
+        except Exception as e:
+            return ParseResult(
+                url=url,
+                platform="unknown",
+                fetch_success=False,
+                error=str(e),
+                parse_time=round(time.time() - start_time, 2),
+            )
+
+    async def _do_parse(self, url: str, config: ParseConfig) -> ParseResult:
+        """执行实际解析：parse -> transcribe"""
+        platform = detect_platform(url)
+        is_vid = is_video_url(url)
+
+        content_type = ContentType.VIDEO if is_vid else ContentType.ARTICLE
+        platform_type = self._detect_platform_type(platform)
+
+        parser_config = config.to_parser_config()
+        parser = ParserFactory.create(url, config=parser_config)
+
+        try:
+            parse_result = await parser.fetch(url)
+
+            if not parse_result.fetch_success:
+                return ParseResult(
+                    url=url,
+                    platform=platform,
+                    platform_type=platform_type,
+                    content_type=content_type,
+                    fetch_success=False,
+                    error=parse_result.error or "Parse failed",
+                )
+
+            result = create_result_from_parser(parse_result)
+            result.platform_type = platform_type
+            result.content_type = content_type
+
+            if is_vid and config.transcribe.enabled and result.fetch_success:
+                transcription = await self._transcribe_audio(url, config.transcribe)
+                result.transcription = transcription
+
+            return result
+
+        finally:
+            await parser.close()
+
+    async def _transcribe_audio(self, url: str, transcribe_config) -> TranscriptionResult:
+        """音频转录"""
+        try:
+            engine = transcribe_config.engine
+            if engine == "auto":
+                engine = "funasr" if transcribe_config.language == "zh" else "whisper"
+
+            if engine == "funasr":
+                transcriber = FunASRTranscriber(
+                    model_size=transcribe_config.model_size,
+                    device=transcribe_config.device,
+                )
+            else:
+                transcriber = WhisperTranscriber(
+                    model_size=transcribe_config.model_size,
+                    device=transcribe_config.device,
+                )
+
+            loop = asyncio.get_event_loop()
+            t_result = await loop.run_in_executor(
+                None,
+                lambda: transcriber.transcribe_from_url(
+                    url,
+                    language=transcribe_config.language,
+                )
+            )
+
+            return TranscriptionResult(
+                success=t_result.success,
+                text=t_result.text,
+                segments=t_result.segments,
+                language=t_result.language or transcribe_config.language,
+                duration=t_result.duration,
+                engine=t_result.engine or engine,
+                error=t_result.error,
+            )
+
+        except Exception as e:
+            return TranscriptionResult(
+                success=False,
+                error=str(e),
+            )
+
+    @staticmethod
+    def _detect_platform_type(platform: str) -> PlatformType:
+        platform_map = {
+            'zhihu': PlatformType.ZHIHU,
+            'bilibili': PlatformType.BILIBILI,
+            'youtube': PlatformType.YOUTUBE,
+            'weixin': PlatformType.WEIXIN,
+            'xiaohongshu': PlatformType.XIAOHONGSHU,
+            'github': PlatformType.GITHUB,
+            'generic': PlatformType.GENERIC,
+        }
+        return platform_map.get(platform, PlatformType.UNKNOWN)
+
+    async def parse_batch(
+        self,
+        urls: List[str],
+        config: Optional[ParseConfig] = None,
+        on_complete=None,
+        on_error=None,
+        concurrent: int = 3
+    ) -> List[ParseResult]:
+        """
+        批量解析多个 URL
+
+        Args:
+            urls: URL 列表
+            config: 配置
+            on_complete: 单个完成回调 (result) -> None
+            on_error: 错误回调 (url, error) -> None
+            concurrent: 并发数
+
+        Returns:
+            List[ParseResult] 结果列表
+        """
+        cfg = config or self.config
+        semaphore = asyncio.Semaphore(concurrent)
+
+        async def _parse_one(url: str) -> ParseResult:
+            async with semaphore:
+                try:
+                    result = await self.parse(url, cfg)
+                    if on_complete:
+                        on_complete(result)
+                    return result
+                except Exception as e:
+                    if on_error:
+                        on_error(url, e)
+                    return ParseResult(
+                        url=url,
+                        platform="unknown",
+                        fetch_success=False,
+                        error=str(e),
+                    )
+
+        tasks = [_parse_one(url) for url in urls]
+        results = await asyncio.gather(*tasks)
+        return list(results)
+
+    async def close(self):
+        """关闭解析器，释放资源"""
+        if self._fetcher:
+            try:
+                await self._fetcher.close()
+            except Exception:
+                pass
+            self._fetcher = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+
+async def parse(
+    url: str,
+    config: Optional[ParseConfig] = None,
+    **kwargs
+) -> ParseResult:
+    """
+    一键解析 URL（便捷函数）
+
+    使用方式:
+        from urlparser import parse
+
+        result = await parse("https://www.bilibili.com/video/BVxxx")
+        print(result.title)
+        print(result.content)
+    """
+    async with UrlParser(config or ParseConfig()) as parser:
+        return await parser.parse(url, **kwargs)
+
+
+async def parse_batch(
+    urls: List[str],
+    config: Optional[ParseConfig] = None,
+    **kwargs
+) -> List[ParseResult]:
+    """
+    批量解析多个 URL（便捷函数）
+
+    使用方式:
+        from urlparser import parse_batch
+
+        results = await parse_batch(["url1", "url2", "url3"])
+    """
+    async with UrlParser(config or ParseConfig()) as parser:
+        return await parser.parse_batch(urls, config, **kwargs)
+
+
+def parse_sync(url: str, **kwargs) -> ParseResult:
+    """
+    同步版本（自动创建事件循环）
+
+    适用于脚本或 Jupyter 环境:
+        from urlparser import parse_sync
+
+        result = parse_sync("https://www.zhihu.com/question/xxx")
+    """
+    return asyncio.run(parse(url, **kwargs))
