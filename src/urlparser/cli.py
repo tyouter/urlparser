@@ -33,6 +33,11 @@ urlparser CLI 接口
     # 音频转录
     python -m urlparser transcribe audio.mp3
     python -m urlparser transcribe https://www.bilibili.com/video/BVxxx --engine funasr
+
+    # 批量转录文件夹
+    python -m urlparser transcribe-folder ./videos --preview
+    python -m urlparser transcribe-folder ./videos --engine funasr
+    python -m urlparser transcribe-folder ./videos --force --no-confirm
 """
 
 import argparse
@@ -57,6 +62,7 @@ def create_parser() -> argparse.ArgumentParser:
     _add_status_parser(subparsers)
     _add_video_info_parser(subparsers)
     _add_transcribe_parser(subparsers)
+    _add_transcribe_folder_parser(subparsers)
 
     return parser
 
@@ -136,6 +142,42 @@ def _add_transcribe_parser(subparsers):
     p.add_argument('--model-size', default='large', help='模型大小')
     p.add_argument('--language', default='zh', help='语言')
     p.add_argument('--output', '-o', help='输出文件路径')
+
+
+def _add_transcribe_folder_parser(subparsers):
+    """添加批量转录文件夹命令"""
+    p = subparsers.add_parser(
+        'transcribe-folder',
+        help='批量转录本地文件夹内的音视频文件'
+    )
+    p.add_argument('directory', help='要扫描的文件夹路径')
+    p.add_argument('--engine', default='auto',
+                   choices=['auto', 'funasr', 'whisper'],
+                   help='转录引擎 (auto=根据语言自动选择)')
+    p.add_argument('--model-size', default='large',
+                   choices=['small', 'base', 'large', 'sensevoice'],
+                   help='模型大小')
+    p.add_argument('--language', default='zh',
+                   help='语言代码 (zh, en, ja 等)')
+    p.add_argument('--recursive', '-r', action='store_true', default=True,
+                   help='递归扫描子文件夹')
+    p.add_argument('--no-recursive', action='store_true',
+                   help='不递归扫描子文件夹')
+    p.add_argument('--skip-existing', action='store_true', default=True,
+                   help='跳过已有 .md 转录文件的音视频')
+    p.add_argument('--force', '-f', action='store_true',
+                   help='强制转录所有文件，包括已有转录的')
+    p.add_argument('--preview', action='store_true',
+                   help='仅预览扫描结果，不执行转录')
+    p.add_argument('--segment-threshold', type=int, default=30,
+                   help='分段时长阈值（分钟），超过此时长的大文件将分段处理')
+    p.add_argument('--max-size', type=int, default=500,
+                   help='最大文件大小阈值（MB），超过此大小的大文件将分段处理')
+    p.add_argument('--no-confirm', action='store_true',
+                   help='跳过开始前的确认提示')
+    p.add_argument('--device', default='auto',
+                   choices=['auto', 'cuda', 'cpu'],
+                   help='计算设备')
 
 
 async def cmd_parse(args):
@@ -339,6 +381,107 @@ async def cmd_transcribe(args):
         print(f"转录失败: {result.error}")
 
 
+async def cmd_transcribe_folder(args):
+    """批量转录文件夹命令"""
+    from .batch_transcriber import (
+        BatchTranscriber, BatchTranscribeConfig,
+        format_batch_result_summary, generate_preview_text
+    )
+    from .utils.media_utils import check_ffmpeg_available
+
+    # 检查 ffmpeg
+    if not check_ffmpeg_available():
+        print("警告: ffmpeg/ffprobe 未找到，将无法获取音视频时长和分段处理")
+        print("请安装 ffmpeg 或确保 C:/ffmpeg/bin/ffmpeg.exe 存在（Windows）")
+        print()
+
+    # 创建配置
+    config = BatchTranscribeConfig(
+        engine=args.engine,
+        model_size=args.model_size,
+        device=args.device,
+        language=args.language,
+        recursive=args.recursive and not args.no_recursive,
+        skip_existing=args.skip_existing and not args.force,
+        segment_threshold_min=args.segment_threshold,
+        max_file_size_mb=args.max_size,
+        confirm_before_start=not args.no_confirm,
+    )
+
+    processor = BatchTranscriber(config)
+
+    # 扫描目录
+    print(f"正在扫描目录: {args.directory}")
+    print()
+
+    try:
+        scan_result, preview_text = processor.scan_and_preview(args.directory)
+    except Exception as e:
+        print(f"扫描失败: {e}")
+        return
+
+    print(preview_text)
+    print()
+
+    # 仅预览模式
+    if args.preview:
+        print("预览模式，未执行转录")
+        return
+
+    # 检查是否有待处理文件
+    pending_files = processor.filter_files_to_process(scan_result)
+
+    if not pending_files:
+        print("没有待处理的文件（所有文件可能已有转录）")
+        return
+
+    print(f"待处理文件: {len(pending_files)} 个")
+    print()
+
+    # 确认开始
+    if config.confirm_before_start:
+        print("是否开始转录？ [y/N]")
+        try:
+            response = input().strip().lower()
+            if response not in ('y', 'yes'):
+                print("已取消")
+                return
+        except EOFError:
+            print("已取消")
+            return
+
+    print()
+    print("=" * 60)
+    print("开始转录...")
+    print("=" * 60)
+    print()
+
+    # 执行转录
+    try:
+        # 进度回调
+        def progress_callback(current, total, file_result, batch_result):
+            status = "OK" if file_result.success else "FAIL"
+            segmented = " (分段)" if file_result.segmented else ""
+            print(f"[{current}/{total}] [{status}] {file_result.file_info.filename}{segmented}")
+            if not file_result.success:
+                print(f"  错误: {file_result.error}")
+            if file_result.md_path:
+                print(f"  输出: {file_result.md_path}")
+
+        batch_result = processor.transcribe_all(pending_files, progress_callback)
+
+        print()
+        print(format_batch_result_summary(batch_result))
+
+    except KeyboardInterrupt:
+        print()
+        print("用户中断转录")
+    except Exception as e:
+        print(f"转录失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def _extract_urls_from_file(file_path: str) -> List[str]:
     import re
 
@@ -378,6 +521,7 @@ def main():
         'status': cmd_status,
         'video-info': cmd_video_info,
         'transcribe': cmd_transcribe,
+        'transcribe-folder': cmd_transcribe_folder,
     }
 
     handler = command_map.get(args.command)

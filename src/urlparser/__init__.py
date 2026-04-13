@@ -21,14 +21,15 @@ urlparser - 通用 URL 资源解析器
 模块结构:
     urlparser/
     ├── core.py          统一入口 (UrlParser, parse, parse_batch)
-    ├── config.py        配置 (ParseConfig)
+    ├── config.py        配置 (ParseConfig, BatchTranscribeConfig)
     ├── models.py        数据模型 (ParseResult, PlatformType, ContentType)
     ├── cli.py           CLI 接口
     ├── fetcher/         URL 读取层 (Playwright, Cookie, UserChrome, BrowserUse)
     ├── parser/          内容解析层 (平台解析器 + 工厂 + Mixins)
     ├── transcriber/     音视频转录层 (FunASR, Whisper, yt-dlp)
+    ├── batch_transcriber/ 批量转录层 (BatchTranscriber, MediaScanner, SegmentHandler)
     ├── storage/         存储层 (缓存, 文件存储, 源文档, 状态管理)
-    └── utils/           工具集 (URL处理, 文本清洗, 文件操作)
+    └── utils/           工具集 (URL处理, 文本清洗, 文件操作, 音视频工具)
 
 使用方式:
 
@@ -79,10 +80,18 @@ from .storage import (
     ResultCache, CacheEntry, ResultStorage,
     SourceDocumentManager, StateManager, ProcessStatus, ResourceState,
 )
+from .batch_transcriber import (
+    BatchTranscriber, BatchTranscribeConfig, BatchResult, FileResult,
+    MediaScanner, MediaFileInfo, ScanResult,
+    SegmentHandler, SegmentationConfig,
+    TranscriptionWriter, WriterConfig,
+)
 from .utils import (
     URLNormalizer, normalize_url, hash_url, detect_platform, is_video_url,
     clean_text, remove_duplicate_lines, extract_main_content,
     ensure_dir, safe_filename, read_json, write_json, read_text, write_text,
+    is_audio_file, is_video_file, is_media_file, get_media_duration,
+    format_duration, format_duration_detailed, file_size_str, list_files,
 )
 
 __all__ = [
@@ -95,6 +104,7 @@ __all__ = [
     'BrowserConfig',
     'ScrollConfig',
     'TranscribeConfig',
+    'BatchTranscribeConfig',
 
     'ParseResult',
     'PlatformType',
@@ -140,6 +150,18 @@ __all__ = [
     'ProcessStatus',
     'ResourceState',
 
+    # Batch transcriber
+    'BatchTranscriber',
+    'BatchResult',
+    'FileResult',
+    'MediaScanner',
+    'MediaFileInfo',
+    'ScanResult',
+    'SegmentHandler',
+    'SegmentationConfig',
+    'TranscriptionWriter',
+    'WriterConfig',
+
     'URLNormalizer',
     'normalize_url',
     'hash_url',
@@ -154,5 +176,15 @@ __all__ = [
     'write_json',
     'read_text',
     'write_text',
+
+    # Media utilities
+    'is_audio_file',
+    'is_video_file',
+    'is_media_file',
+    'get_media_duration',
+    'format_duration',
+    'format_duration_detailed',
+    'file_size_str',
+    'list_files',
 ]
 __version__ = '3.1.0'

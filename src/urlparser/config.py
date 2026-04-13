@@ -1,7 +1,7 @@
 """
 统一配置
 
-整合解析器配置 + 转录配置 + 浏览器配置
+整合解析器配置 + 转录配置 + 浏览器配置 + 批量转录配置
 """
 
 from dataclasses import dataclass, field
@@ -108,3 +108,16 @@ class ParseConfig:
             close_login_popup=self.close_login_popup,
             stealth_mode=self.browser.stealth_mode,
         )
+
+
+# 批量转录配置（从 batch_transcriber 模块导入）
+# 用户可以直接从 config 模块访问
+from .batch_transcriber.processor import BatchTranscribeConfig
+
+__all__ = [
+    'BrowserConfig',
+    'ScrollConfig',
+    'TranscribeConfig',
+    'ParseConfig',
+    'BatchTranscribeConfig',
+]
