@@ -32,6 +32,7 @@ class BatchTranscribeConfig:
     max_file_size_mb: float = 500.0      # 最大文件大小阈值（MB）
     show_progress: bool = True     # 显示进度
     confirm_before_start: bool = True    # 开始前确认
+    output_dir: Optional[str] = None     # 输出目录（None 表示保存到源文件同目录）
 
     def get_segment_threshold_seconds(self) -> float:
         """获取分段阈值（秒）"""
@@ -133,7 +134,9 @@ class BatchTranscriber:
     def __init__(self, config: Optional[BatchTranscribeConfig] = None):
         self.config = config or BatchTranscribeConfig()
         self.scanner = MediaScanner()
-        self.writer = TranscriptionWriter()
+        self.writer = TranscriptionWriter(
+            output_dir=Path(self.config.output_dir) if self.config.output_dir else None
+        )
         self.transcriber = None
         self.segment_handler = None
 
@@ -208,6 +211,17 @@ class BatchTranscriber:
             scan_result.files,
             skip_existing=self.config.skip_existing
         )
+
+        # 如果指定了 output_dir，需要检查 output_dir 中是否已有 MD 文件
+        if self.config.output_dir and self.config.skip_existing:
+            output_dir = Path(self.config.output_dir)
+            pending_files = []
+            for f in files:
+                expected_md = output_dir / (f.path.stem + '.md')
+                if not expected_md.exists():
+                    pending_files.append(f)
+            return pending_files
+
         return files
 
     def transcribe_single(

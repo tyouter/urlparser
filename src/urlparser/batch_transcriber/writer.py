@@ -26,14 +26,16 @@ class WriterConfig:
 class TranscriptionWriter:
     """转录结果写入器"""
 
-    def __init__(self, config: Optional[WriterConfig] = None):
+    def __init__(self, config: Optional[WriterConfig] = None, output_dir: Optional[Path] = None):
         self.config = config or WriterConfig()
+        self.output_dir = output_dir  # 指定的输出目录
 
     def write(
         self,
         media_path: Path,
         result: TranscriptionResult,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        output_path: Optional[Path] = None
     ) -> Path:
         """
         写入转录结果到 MD 文件
@@ -42,11 +44,21 @@ class TranscriptionWriter:
             media_path: 原始音视频文件路径
             result: 转录结果
             metadata: 额外元数据
+            output_path: 指定的输出路径（可选）
 
         Returns:
             生成的 MD 文件路径
         """
-        md_path = media_path.with_suffix('.md')
+        # 确定输出路径
+        if output_path:
+            md_path = output_path
+        elif self.output_dir:
+            # 使用指定的输出目录
+            md_path = self.output_dir / (media_path.stem + '.md')
+        else:
+            # 默认保存到媒体文件同目录
+            md_path = media_path.with_suffix('.md')
+
         content = self._generate_content(media_path, result, metadata)
 
         md_path.write_text(content, encoding='utf-8')

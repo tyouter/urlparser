@@ -143,7 +143,8 @@ def _add_transcribe_parser(subparsers):
     p.add_argument('--model-size', default='large', help='模型大小')
     p.add_argument('--language', default='zh', help='语言')
     p.add_argument('--device', default='auto', choices=['auto', 'cuda', 'cpu'], help='计算设备')
-    p.add_argument('--output', '-o', help='输出文件路径')
+    p.add_argument('--output', '-o', help='输出文件路径（文本格式）')
+    p.add_argument('--output-dir', help='输出目录（保存 Markdown 文件）')
 
 
 def _add_transcribe_folder_parser(subparsers):
@@ -182,6 +183,8 @@ def _add_transcribe_folder_parser(subparsers):
                    help='计算设备')
     p.add_argument('--skip-dep-check', action='store_true',
                    help='跳过依赖检查')
+    p.add_argument('--output-dir', '-o',
+                   help='输出目录（保存 Markdown 文件，默认保存到源文件同目录）')
 
 
 def _add_install_deps_parser(subparsers):
@@ -373,6 +376,7 @@ async def cmd_transcribe(args):
     from .transcriber import FunASRTranscriber, WhisperTranscriber
     from .dependency_installer import ensure_transcribe_dependencies
     from .utils.media_utils import is_video_file
+    from .batch_transcriber.writer import TranscriptionWriter
 
     # 检查依赖
     if not ensure_transcribe_dependencies(auto_install=True):
@@ -405,10 +409,22 @@ async def cmd_transcribe(args):
 
     if result.success:
         output_text = result.text
-        if args.output:
+
+        # 如果指定了 output_dir，保存为 Markdown 格式
+        if args.output_dir:
+            output_dir = Path(args.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            writer = TranscriptionWriter(output_dir=output_dir)
+            media_path = Path(input_path)
+            md_path = writer.write(media_path, result)
+            print(f"转录完成，Markdown 文件已保存到: {md_path}")
+
+        elif args.output:
+            # 指定了输出文件路径（纯文本）
             Path(args.output).write_text(output_text, encoding='utf-8')
             print(f"转录完成，已保存到: {args.output}")
         else:
+            # 默认直接输出文本
             print(output_text)
     else:
         print(f"转录失败: {result.error}")
@@ -440,6 +456,7 @@ async def cmd_transcribe_folder(args):
         segment_threshold_min=args.segment_threshold,
         max_file_size_mb=args.max_size,
         confirm_before_start=not args.no_confirm,
+        output_dir=args.output_dir,
     )
 
     processor = BatchTranscriber(config)
