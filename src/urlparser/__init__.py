@@ -53,6 +53,29 @@ urlparser - 通用 URL 资源解析器
     python -m urlparser status validate
 """
 
+# =============================================================================
+# CRITICAL: Set cache directories BEFORE any imports to prevent re-downloading
+# =============================================================================
+import os
+from pathlib import Path
+
+# ModelScope cache for FunASR models
+_modelscope_cache = Path.home() / '.cache' / 'modelscope'
+_modelscope_cache.mkdir(parents=True, exist_ok=True)
+os.environ['MODELSCOPE_CACHE'] = str(_modelscope_cache)
+
+# HuggingFace cache for Whisper models
+_hf_cache = Path.home() / '.cache' / 'huggingface'
+_hf_cache.mkdir(parents=True, exist_ok=True)
+os.environ['HF_HOME'] = str(_hf_cache)
+os.environ['HUGGINGFACE_HUB_CACHE'] = str(_hf_cache / 'hub')
+
+# OpenMP workaround for Windows
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+# =============================================================================
+# End of cache setup - now imports can proceed
+# =============================================================================
+
 from .core import parse, parse_batch, parse_sync, UrlParser
 from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig
 from .models import (

@@ -243,7 +243,14 @@ class BatchTranscriber:
         self._init_segment_handler()
 
         start_time = time.time()
-        result = FileResult(file_info=file_info)
+        result = FileResult(
+            file_info=file_info,
+            transcription=TranscriptionResult(
+                success=False,
+                error="Not started",
+                engine="unknown"
+            )
+        )
 
         try:
             # 判断是否需要分段

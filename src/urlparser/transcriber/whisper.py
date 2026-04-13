@@ -8,8 +8,6 @@ import os
 from typing import Optional
 from pathlib import Path
 
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-
 from .base import BaseTranscriber, TranscriptionResult
 
 

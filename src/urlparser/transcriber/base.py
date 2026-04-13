@@ -5,6 +5,68 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
+import subprocess
+import os
+
+
+def convert_audio_for_funasr(input_path: str, output_path: str,
+                             start: Optional[float] = None, end: Optional[float] = None) -> bool:
+    """
+    Convert audio to 16kHz mono WAV format that FunASR expects.
+
+    FunASR requires specific audio format to avoid memory allocation bugs.
+
+    Args:
+        input_path: Input audio/video file
+        output_path: Output WAV file path
+        start: Start time in seconds (optional, for segment extraction)
+        end: End time in seconds (optional, for segment extraction)
+
+    Returns:
+        True if conversion successful
+    """
+    from pathlib import Path
+
+    try:
+        ffmpeg_cmd = 'ffmpeg'
+        if os.name == 'nt' and os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
+            ffmpeg_cmd = 'C:/ffmpeg/bin/ffmpeg.exe'
+
+        cmd = [ffmpeg_cmd]
+
+        if start is not None:
+            cmd.extend(['-ss', str(start)])
+        if end is not None:
+            cmd.extend(['-to', str(end)])
+
+        cmd.extend([
+            '-i', input_path,
+            '-ar', '16000',
+            '-ac', '1',
+            '-f', 'wav',
+            '-y',
+            output_path
+        ])
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=600
+        )
+
+        if result.returncode == 0:
+            output_file = Path(output_path)
+            if output_file.exists():
+                file_size = output_file.stat().st_size
+                if file_size > 0:
+                    return True
+        else:
+            print(f"FFmpeg stderr: {result.stderr[:500] if result.stderr else 'None'}")
+
+        return False
+    except Exception as e:
+        print(f"Audio conversion failed: {e}")
+        return False
 
 
 @dataclass
@@ -43,12 +105,12 @@ class BaseTranscriber(ABC):
         pass
 
     def transcribe_from_url(self, url: str, language: str = "zh", use_audio_only: bool = True) -> TranscriptionResult:
-        import os
         import tempfile
         from pathlib import Path
 
         temp_dir = tempfile.mkdtemp(prefix='transcriber_')
         audio_file = None
+        converted_file = None
 
         try:
             import yt_dlp
@@ -63,13 +125,9 @@ class BaseTranscriber(ABC):
                 ydl_opts['ffmpeg_location'] = 'C:/ffmpeg/bin/ffmpeg.exe'
 
             if use_audio_only:
+                # Download best audio, keep original format first
                 ydl_opts['format'] = 'bestaudio/best'
                 ydl_opts['outtmpl'] = os.path.join(temp_dir, '%(title)s.%(ext)s')
-                ydl_opts['postprocessors'] = [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }]
             else:
                 ydl_opts['format'] = 'bestvideo+bestaudio/best'
                 ydl_opts['outtmpl'] = os.path.join(temp_dir, '%(title)s.%(ext)s')
@@ -94,6 +152,20 @@ class BaseTranscriber(ABC):
                     engine=self.engine_name
                 )
 
+            # For FunASR, convert to 16kHz mono WAV to avoid memory bugs
+            if self.engine_name == "funasr":
+                converted_file = os.path.join(temp_dir, 'audio_converted.wav')
+                print(f"Converting audio for FunASR: {audio_file} -> {converted_file}")
+                if convert_audio_for_funasr(audio_file, converted_file):
+                    from pathlib import Path
+                    file_size = Path(converted_file).stat().st_size
+                    print(f"Conversion successful, output size: {file_size} bytes")
+                    audio_file = converted_file
+                else:
+                    print(f"Conversion failed, using original file")
+                    # Fallback: try original file
+                    pass
+
             return self.transcribe(audio_file, language)
 
         except Exception as e:
@@ -113,18 +185,32 @@ class BaseTranscriber(ABC):
 
     def transcribe_from_local_video(self, video_path: str, language: str = "zh",
                                      extract_audio_only: bool = False) -> TranscriptionResult:
-        import os
         import tempfile
-        import subprocess
+        from pathlib import Path
 
         temp_audio_file = None
 
         try:
-            if extract_audio_only:
+            audio_path = video_path
+
+            # For FunASR, convert to 16kHz mono WAV to avoid memory bugs
+            if self.engine_name == "funasr":
+                temp_audio_file = tempfile.mktemp(suffix='.wav', prefix='funasr_audio_')
+                if convert_audio_for_funasr(video_path, temp_audio_file):
+                    audio_path = temp_audio_file
+                else:
+                    # Fallback to original
+                    audio_path = video_path
+            elif extract_audio_only:
+                # For other engines, extract audio if requested
                 temp_audio_file = tempfile.mktemp(suffix='.mp3', prefix='audio_')
 
+                ffmpeg_cmd = 'ffmpeg'
+                if os.name == 'nt' and os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
+                    ffmpeg_cmd = 'C:/ffmpeg/bin/ffmpeg.exe'
+
                 cmd = [
-                    'ffmpeg',
+                    ffmpeg_cmd,
                     '-i', video_path,
                     '-vn',
                     '-acodec', 'libmp3lame',
@@ -133,14 +219,11 @@ class BaseTranscriber(ABC):
                     temp_audio_file
                 ]
 
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                # Use binary mode to avoid Windows encoding issues
+                result = subprocess.run(cmd, capture_output=True, timeout=60)
 
-                if result.returncode != 0:
-                    audio_path = video_path
-                else:
+                if result.returncode == 0 and Path(temp_audio_file).exists():
                     audio_path = temp_audio_file
-            else:
-                audio_path = video_path
 
             return self.transcribe(audio_path, language)
 
