@@ -142,6 +142,7 @@ def _add_transcribe_parser(subparsers):
     p.add_argument('--engine', default='auto', choices=['auto', 'funasr', 'whisper'], help='转录引擎')
     p.add_argument('--model-size', default='large', help='模型大小')
     p.add_argument('--language', default='zh', help='语言')
+    p.add_argument('--device', default='auto', choices=['auto', 'cuda', 'cpu'], help='计算设备')
     p.add_argument('--output', '-o', help='输出文件路径')
 
 
@@ -371,6 +372,7 @@ async def cmd_video_info(args):
 async def cmd_transcribe(args):
     from .transcriber import FunASRTranscriber, WhisperTranscriber
     from .dependency_installer import ensure_transcribe_dependencies
+    from .utils.media_utils import is_video_file
 
     # 检查依赖
     if not ensure_transcribe_dependencies(auto_install=True):
@@ -383,14 +385,21 @@ async def cmd_transcribe(args):
         engine = 'funasr' if args.language == 'zh' else 'whisper'
 
     if engine == 'funasr':
-        transcriber = FunASRTranscriber(model_size=args.model_size)
+        transcriber = FunASRTranscriber(model_size=args.model_size, device=args.device)
     else:
-        transcriber = WhisperTranscriber(model_size=args.model_size)
+        transcriber = WhisperTranscriber(model_size=args.model_size, device=args.device)
 
     input_path = args.input
 
     if input_path.startswith('http'):
         result = transcriber.transcribe_from_url(input_path, language=args.language)
+    elif is_video_file(input_path):
+        # 本地视频文件需要先提取音频
+        result = transcriber.transcribe_from_local_video(
+            input_path,
+            language=args.language,
+            extract_audio_only=True
+        )
     else:
         result = transcriber.transcribe(input_path, language=args.language)
 
