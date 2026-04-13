@@ -93,6 +93,11 @@ from .utils import (
     is_audio_file, is_video_file, is_media_file, get_media_duration,
     format_duration, format_duration_detailed, file_size_str, list_files,
 )
+from .dependency_installer import (
+    ensure_dependency, ensure_all_dependencies,
+    ensure_transcribe_dependencies, ensure_core_dependencies,
+    is_package_installed, is_ffmpeg_installed,
+)
 
 __all__ = [
     'parse',
@@ -186,5 +191,13 @@ __all__ = [
     'format_duration_detailed',
     'file_size_str',
     'list_files',
+
+    # Dependency installer
+    'ensure_dependency',
+    'ensure_all_dependencies',
+    'ensure_transcribe_dependencies',
+    'ensure_core_dependencies',
+    'is_package_installed',
+    'is_ffmpeg_installed',
 ]
 __version__ = '3.1.0'

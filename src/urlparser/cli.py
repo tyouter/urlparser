@@ -63,6 +63,7 @@ def create_parser() -> argparse.ArgumentParser:
     _add_video_info_parser(subparsers)
     _add_transcribe_parser(subparsers)
     _add_transcribe_folder_parser(subparsers)
+    _add_install_deps_parser(subparsers)
 
     return parser
 
@@ -178,6 +179,22 @@ def _add_transcribe_folder_parser(subparsers):
     p.add_argument('--device', default='auto',
                    choices=['auto', 'cuda', 'cpu'],
                    help='计算设备')
+    p.add_argument('--skip-dep-check', action='store_true',
+                   help='跳过依赖检查')
+
+
+def _add_install_deps_parser(subparsers):
+    """添加依赖安装命令"""
+    p = subparsers.add_parser(
+        'install-deps',
+        help='检查并安装依赖'
+    )
+    p.add_argument('--transcribe', '-t', action='store_true',
+                   help='仅安装转录相关依赖')
+    p.add_argument('--core', '-c', action='store_true',
+                   help='仅安装核心依赖')
+    p.add_argument('--dry-run', action='store_true',
+                   help='仅检查，不安装')
 
 
 async def cmd_parse(args):
@@ -353,6 +370,13 @@ async def cmd_video_info(args):
 
 async def cmd_transcribe(args):
     from .transcriber import FunASRTranscriber, WhisperTranscriber
+    from .dependency_installer import ensure_transcribe_dependencies
+
+    # 检查依赖
+    if not ensure_transcribe_dependencies(auto_install=True):
+        print("\n错误: 转录依赖不完整，无法继续")
+        print("请使用 'urlparser install-deps --transcribe' 安装依赖")
+        return
 
     engine = args.engine
     if engine == 'auto':
@@ -387,13 +411,14 @@ async def cmd_transcribe_folder(args):
         BatchTranscriber, BatchTranscribeConfig,
         format_batch_result_summary, generate_preview_text
     )
-    from .utils.media_utils import check_ffmpeg_available
+    from .dependency_installer import ensure_transcribe_dependencies
 
-    # 检查 ffmpeg
-    if not check_ffmpeg_available():
-        print("警告: ffmpeg/ffprobe 未找到，将无法获取音视频时长和分段处理")
-        print("请安装 ffmpeg 或确保 C:/ffmpeg/bin/ffmpeg.exe 存在（Windows）")
-        print()
+    # 检查依赖（除非用户跳过）
+    if not args.skip_dep_check:
+        if not ensure_transcribe_dependencies(auto_install=True):
+            print("\n错误: 转录依赖不完整，无法继续")
+            print("请使用 'urlparser install-deps --transcribe' 安装依赖")
+            return
 
     # 创建配置
     config = BatchTranscribeConfig(
@@ -506,6 +531,20 @@ def _extract_urls_from_file(file_path: str) -> List[str]:
     return list(dict.fromkeys(urls))
 
 
+async def cmd_install_deps(args):
+    """CLI 命令: 安装依赖"""
+    from .dependency_installer import ensure_all_dependencies, ensure_transcribe_dependencies, ensure_core_dependencies
+
+    auto_install = not args.dry_run
+
+    if args.transcribe:
+        ensure_transcribe_dependencies(auto_install=auto_install)
+    elif args.core:
+        ensure_core_dependencies(auto_install=auto_install)
+    else:
+        ensure_all_dependencies(auto_install=auto_install)
+
+
 def main():
     parser = create_parser()
     args = parser.parse_args()
@@ -522,6 +561,7 @@ def main():
         'video-info': cmd_video_info,
         'transcribe': cmd_transcribe,
         'transcribe-folder': cmd_transcribe_folder,
+        'install-deps': cmd_install_deps,
     }
 
     handler = command_map.get(args.command)
