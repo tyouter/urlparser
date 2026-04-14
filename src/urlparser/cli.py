@@ -38,6 +38,11 @@ urlparser CLI 接口
     python -m urlparser transcribe-folder ./videos --preview
     python -m urlparser transcribe-folder ./videos --engine funasr
     python -m urlparser transcribe-folder ./videos --force --no-confirm
+
+    # 安装 Claude Code Skill
+    python -m urlparser install-skill
+    python -m urlparser install-skill --symlink
+    python -m urlparser install-skill --project
 """
 
 import argparse
@@ -64,6 +69,7 @@ def create_parser() -> argparse.ArgumentParser:
     _add_transcribe_parser(subparsers)
     _add_transcribe_folder_parser(subparsers)
     _add_install_deps_parser(subparsers)
+    _add_install_skill_parser(subparsers)
 
     return parser
 
@@ -199,6 +205,22 @@ def _add_install_deps_parser(subparsers):
                    help='仅安装核心依赖')
     p.add_argument('--dry-run', action='store_true',
                    help='仅检查，不安装')
+
+
+def _add_install_skill_parser(subparsers):
+    """添加 Skill 安装命令"""
+    p = subparsers.add_parser(
+        'install-skill',
+        help='安装 urlparser Skill 到 Claude Code'
+    )
+    p.add_argument('--symlink', '-s', action='store_true',
+                   help='使用符号链接（推荐，代码更新自动同步）')
+    p.add_argument('--project', '-p', action='store_true',
+                   help='安装到当前项目 .claude/skills/ 而非全局 ~/.claude/skills/')
+    p.add_argument('--force', '-f', action='store_true',
+                   help='强制覆盖已存在的 Skill')
+    p.add_argument('--dry-run', action='store_true',
+                   help='仅显示将要执行的操作，不实际安装')
 
 
 async def cmd_parse(args):
@@ -571,7 +593,203 @@ async def cmd_install_deps(args):
         ensure_all_dependencies(auto_install=auto_install)
 
 
+def cmd_install_skill(args):
+    """CLI 命令: 安装 Skill 到 Claude Code"""
+    import shutil
+    import urlparser
+
+    # 显示信息
+    print("=" * 60)
+    print("urlparser Skill 安装")
+    print("=" * 60)
+    print()
+
+    # 显示安装前提
+    pkg_path = Path(urlparser.__path__[0])
+    pkg_version = urlparser.__version__
+
+    print(f"urlparser 已安装: v{pkg_version}")
+    print(f"安装路径: {pkg_path}")
+    print()
+
+    # 检查是 pip 安装还是本地开发安装
+    is_editable = 'site-packages' not in str(pkg_path).lower()
+    if is_editable:
+        print("安装模式: 本地开发 (-e editable)")
+        print("  → Skill 将链接到源码目录，代码更新自动同步")
+    else:
+        print("安装模式: pip 安装 (site-packages)")
+        print("  → Skill 依赖 pip 安装的包，更新 urlparser 需重新 pip install")
+
+    print()
+
+    # 获取 skill 源目录
+    skill_src = Path(urlparser.__path__[0]) / 'skill'
+
+    if not skill_src.exists():
+        print(f"错误: Skill 目录不存在: {skill_src}")
+        return
+
+    # 确定目标目录
+    if args.project:
+        # 项目级安装
+        skill_dst = Path.cwd() / '.claude' / 'skills' / 'urlparser'
+    else:
+        # 全局安装
+        skill_dst = Path.home() / '.claude' / 'skills' / 'urlparser'
+
+    # 确保父目录存在
+    skill_dst.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Skill 源目录: {skill_src}")
+    print(f"Skill 目标目录: {skill_dst}")
+    print(f"链接方式: {'符号链接' if args.symlink else '复制'}")
+    print(f"安装范围: {'项目级' if args.project else '全局'}")
+    print()
+
+    # 检查目标是否已存在
+    if skill_dst.exists():
+        if args.dry_run:
+            print(f"[DRY-RUN] 将删除现有: {skill_dst}")
+        elif args.force:
+            print(f"删除现有 Skill: {skill_dst}")
+            # Windows Junction/符号链接需要特殊处理
+            if sys.platform == 'win32':
+                # Windows: Junction 是目录链接，需要用 rmdir 或 os.rmdir
+                import subprocess
+                try:
+                    subprocess.run(['cmd', '/c', 'rmdir', str(skill_dst)], check=True, capture_output=True)
+                except subprocess.CalledProcessError:
+                    # 如果不是 Junction，尝试普通删除
+                    if skill_dst.is_symlink():
+                        skill_dst.unlink()
+                    else:
+                        shutil.rmtree(skill_dst)
+            else:
+                # Linux/macOS
+                if skill_dst.is_symlink() or skill_dst.is_dir():
+                    skill_dst.unlink() if skill_dst.is_symlink() else shutil.rmtree(skill_dst)
+        else:
+            print(f"目标已存在: {skill_dst}")
+            print("使用 --force 强制覆盖，或先手动删除")
+            return
+
+    if args.dry_run:
+        if args.symlink:
+            print(f"[DRY-RUN] 将创建符号链接: {skill_dst} -> {skill_src}")
+        else:
+            print(f"[DRY-RUN] 将复制目录: {skill_src} -> {skill_dst}")
+        print()
+        print("[DRY-RUN] 未执行实际安装")
+        return
+
+    # 执行安装
+    try:
+        if args.symlink:
+            # 符号链接模式
+            # Windows 需要处理权限问题
+            if sys.platform == 'win32':
+                # Windows: 使用目录 Junction 或符号链接
+                # Junction 不需要管理员权限
+                import subprocess
+                try:
+                    # 尝试创建符号链接（需要管理员权限或开发者模式）
+                    skill_dst.symlink_to(skill_src)
+                    print("符号链接创建成功")
+                except OSError as e:
+                    print(f"符号链接失败: {e}")
+                    print("尝试使用 Junction (Windows 目录链接)...")
+
+                    # 使用 Junction 作为备选
+                    # Junction 可以在不需要管理员权限的情况下创建目录链接
+                    subprocess.run(
+                        ['cmd', '/c', 'mklink', '/J',
+                         str(skill_dst), str(skill_src)],
+                        check=True,
+                        capture_output=True
+                    )
+                    print(f"Junction 创建成功: {skill_dst} <-> {skill_src}")
+            else:
+                # Linux/macOS: 直接创建符号链接
+                skill_dst.symlink_to(skill_src)
+                print(f"符号链接创建成功: {skill_dst} -> {skill_src}")
+
+        else:
+            # 复制模式
+            shutil.copytree(skill_src, skill_dst)
+            print(f"Skill 复制完成: {skill_dst}")
+
+        print()
+        print("=" * 60)
+        print("安装成功!")
+        print("=" * 60)
+        print()
+
+        # 验证安装
+        skill_md = skill_dst / 'SKILL.md'
+        if skill_md.exists():
+            print(f"Skill 定义文件: {skill_md}")
+            print()
+
+            # 验证 import 能否正常工作
+            print("验证 import urlparser...")
+            try:
+                # 测试 import 是否能正常工作
+                import subprocess
+                result = subprocess.run(
+                    [sys.executable, '-c', 'from urlparser import parse; print("OK")'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0 and 'OK' in result.stdout:
+                    print("  ✓ import urlparser 正常")
+                else:
+                    print("  ⚠ import urlparser 可能有问题")
+                    if result.stderr:
+                        print(f"    错误: {result.stderr[:200]}")
+            except Exception as e:
+                print(f"  ⚠ 验证失败: {e}")
+
+            print()
+
+            # 提示使用方式
+            if args.project:
+                print("项目级 Skill 已安装，Claude Code 将在当前项目自动发现。")
+            else:
+                print("全局 Skill 已安装，Claude Code 将自动发现 urlparser Skill。")
+            print()
+            print("触发方式:")
+            print("  - 自然语言: '帮我解析这个知乎链接 https://...' ")
+            print("  - 显式调用: /urlparser parse <url>")
+            print()
+            print("注意事项:")
+            if is_editable:
+                print("  - 本地开发模式，代码更新自动同步到 Skill")
+                print("  - Skill 脚本依赖本地 urlparser 包")
+            else:
+                print("  - pip 安装模式，Skill 依赖 site-packages 中的 urlparser")
+                print("  - 更新 urlparser 后需重新 pip install urlparser")
+                print("  - Skill 目录只包含入口脚本，不含核心代码")
+            print()
+            print("卸载方式:")
+            print(f"  删除目录: {skill_dst}")
+
+        else:
+            print(f"警告: SKILL.md 不存在，Skill 可能不完整")
+
+    except Exception as e:
+        print(f"安装失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def main():
+    # Windows 控制台编码处理
+    if sys.platform == 'win32':
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+
     parser = create_parser()
     args = parser.parse_args()
 
@@ -588,11 +806,16 @@ def main():
         'transcribe': cmd_transcribe,
         'transcribe-folder': cmd_transcribe_folder,
         'install-deps': cmd_install_deps,
+        'install-skill': cmd_install_skill,
     }
 
     handler = command_map.get(args.command)
     if handler:
-        asyncio.run(handler(args))
+        # install-skill 是同步命令，不需要 asyncio
+        if args.command == 'install-skill':
+            handler(args)
+        else:
+            asyncio.run(handler(args))
     else:
         parser.print_help()
 
