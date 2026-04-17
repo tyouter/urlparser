@@ -8,10 +8,21 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
 _DEFAULT_PROMPT = (
     "请描述这个视频帧的内容，包括场景类型、主要物体、人物动作、文字信息。"
     "用中文简要回答，不超过100字。"
 )
+
+
+def _load_image_tensor(image_path: str):
+    """Load image as OpenVINO Tensor for VLMPipeline"""
+    import openvino as ov
+    pic = Image.open(image_path).convert("RGB")
+    image_data = np.array(pic)[None]
+    return ov.Tensor(image_data)
 
 
 class BaseVLMEngine(ABC):
@@ -73,18 +84,18 @@ class OpenVINOEngine(BaseVLMEngine):
         if not self._loaded:
             raise RuntimeError("模型未加载")
 
-        try:
-            from PIL import Image
-        except ImportError:
-            raise ImportError("Pillow 未安装。请运行: pip install pillow")
+        import openvino_genai as ov_genai
 
-        image = Image.open(image_path)
+        image_tensor = _load_image_tensor(image_path)
+        history = ov_genai.ChatHistory()
+        history.append({"role": "user", "content": prompt})
+
         result = self._model.generate(
-            prompt=prompt,
-            image=image,
+            history,
+            images=[image_tensor],
             max_new_tokens=200,
         )
-        return str(result).strip()
+        return str(result.texts[0]).strip()
 
     def unload(self) -> None:
         self._model = None

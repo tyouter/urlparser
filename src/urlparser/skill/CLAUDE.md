@@ -123,6 +123,10 @@ config = ParseConfig.with_transcribe(engine="funasr")
 # 带 Cookie
 config = ParseConfig.with_cookies(cookies_file="path")
 
+# 带在线解析（LLM API，无需浏览器）
+config = ParseConfig.with_online_parse()
+config = ParseConfig(parse_mode="online")
+
 # 完整功能
 config = ParseConfig.full_feature()
 ```

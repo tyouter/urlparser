@@ -8,6 +8,7 @@ from .base import BaseTranscriber, TranscriptionResult
 from .funasr import FunASRTranscriber
 from .whisper import WhisperTranscriber
 from .video_info import YtdlpExtractor, extract_video_info, is_video_url
+from .online_video_fetch import OnlineVideoFetcher, fetch_video_online
 
 __all__ = [
     'BaseTranscriber',
@@ -17,4 +18,6 @@ __all__ = [
     'YtdlpExtractor',
     'extract_video_info',
     'is_video_url',
+    'OnlineVideoFetcher',
+    'fetch_video_online',
 ]

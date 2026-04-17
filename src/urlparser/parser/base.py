@@ -261,6 +261,11 @@ class VideoParser(BaseParser):
             if not is_video_url(url):
                 return await super().fetch(url)
 
+            # 在线模式：直接调用 LLM API，跳过 yt-dlp + 浏览器
+            if self.config.parse_mode == "online":
+                return await self._fetch_online(url)
+
+            # 本地模式：yt-dlp 提取
             loop = asyncio.get_event_loop()
             content = await loop.run_in_executor(None, lambda: extract_video_info(url))
 
@@ -294,6 +299,40 @@ class VideoParser(BaseParser):
                 fetch_success=False,
                 error=str(e)
             )
+
+    async def _fetch_online(self, url: str) -> ParseResult:
+        """在线模式：通过 LLM API 获取视频信息"""
+        from ..transcriber.online_video_fetch import fetch_video_online
+
+        content = await fetch_video_online(url)
+
+        if content.get('fetch_success'):
+            return ParseResult(
+                url=url,
+                platform=self.platform,
+                title=content.get('title', ''),
+                content=content.get('description', ''),
+                author=content.get('author', ''),
+                publish_date=content.get('publish_date_formatted', ''),
+                video_specific={
+                    'duration': content.get('duration', ''),
+                    'views': content.get('views', ''),
+                    'likes': content.get('likes', ''),
+                    'coins': content.get('coins', ''),
+                    'favorites': content.get('favorites', ''),
+                    'tags': content.get('tags', ''),
+                    'subtitles': content.get('subtitles', []),
+                },
+                metadata=content,
+                fetch_success=True
+            )
+
+        return ParseResult(
+            url=url,
+            platform=self.platform,
+            fetch_success=False,
+            error=content.get('error', 'Online parse failed')
+        )
 
 
 class ArticleParser(BaseParser):

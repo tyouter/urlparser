@@ -40,6 +40,7 @@ class ParserConfig:
     expand_full_text: bool = True
     close_login_popup: bool = True
     stealth_mode: bool = True
+    parse_mode: str = "local"  # "local" | "online"
 
     def to_dict(self) -> Dict:
         return {
@@ -53,7 +54,8 @@ class ParserConfig:
             'scroll_delay': self.scroll_delay,
             'expand_full_text': self.expand_full_text,
             'close_login_popup': self.close_login_popup,
-            'stealth_mode': self.stealth_mode
+            'stealth_mode': self.stealth_mode,
+            'parse_mode': self.parse_mode,
         }
 
 

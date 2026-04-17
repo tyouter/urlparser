@@ -12,12 +12,69 @@ from typing import Optional
 from .models import (
     ComprehensionConfig, ComprehensionMode,
 )
-from .models import detect_hardware, select_model
+from .models import detect_hardware, select_model, resolve_model_path
 from .frame_extractor import FrameExtractor
 from .vlm_engine import BaseVLMEngine, OpenVINOEngine, LlamaCppEngine
 
 # Import result types from parent to avoid circular imports
 from ..models import VisualFrameResult, ComprehensionResult
+
+
+def _find_ffmpeg() -> str:
+    """查找 ffmpeg 可执行文件路径"""
+    # Try PATH first
+    try:
+        result = subprocess.run(
+            ['ffmpeg', '-version'], capture_output=True, timeout=5
+        )
+        if result.returncode == 0:
+            return 'ffmpeg'
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Try imageio-ffmpeg bundled ffmpeg
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, Exception):
+        pass
+
+    # Try Windows common location
+    if os.name == 'nt':
+        for p in [r'C:\ffmpeg\bin\ffmpeg.exe']:
+            if os.path.exists(p):
+                return p
+
+    return 'ffmpeg'  # fallback, will fail gracefully
+
+
+def _find_ffprobe() -> str:
+    """查找 ffprobe 可执行文件路径"""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-version'], capture_output=True, timeout=5
+        )
+        if result.returncode == 0:
+            return 'ffprobe'
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # imageio-ffmpeg doesn't include ffprobe, check alongside ffmpeg
+    ffmpeg_path = _find_ffmpeg()
+    if os.path.isabs(ffmpeg_path):
+        ffprobe_path = os.path.join(
+            os.path.dirname(ffmpeg_path),
+            os.path.basename(ffmpeg_path).replace('ffmpeg', 'ffprobe')
+        )
+        if os.path.exists(ffprobe_path):
+            return ffprobe_path
+
+    if os.name == 'nt':
+        p = r'C:\ffmpeg\bin\ffprobe.exe'
+        if os.path.exists(p):
+            return p
+
+    return 'ffprobe'
 
 
 class ComprehensionPipeline:
@@ -63,9 +120,12 @@ class ComprehensionPipeline:
         self._temp_dir = tempfile.mkdtemp(prefix="urlparser_comp_")
         self._frame_dir = os.path.join(self._temp_dir, "frames")
 
+        # 查找 ffmpeg
+        ffmpeg_path = _find_ffmpeg()
+
         try:
             # 1. 下载视频
-            video_path = self._download_video(url)
+            video_path = self._download_video(url, ffmpeg_path)
             if not video_path:
                 return ComprehensionResult(
                     success=False, mode=mode, error="视频下载失败"
@@ -73,7 +133,8 @@ class ComprehensionPipeline:
 
             # 2. 场景检测 + 关键帧提取
             scenes = FrameExtractor.detect_scenes(
-                video_path, threshold=self.config.scdet_threshold
+                video_path, threshold=self.config.scdet_threshold,
+                ffmpeg_path=ffmpeg_path,
             )
             if not scenes:
                 return ComprehensionResult(
@@ -83,6 +144,7 @@ class ComprehensionPipeline:
             frames = FrameExtractor.extract_keyframes(
                 video_path, scenes, self._frame_dir,
                 max_frames=self.config.max_frames,
+                ffmpeg_path=ffmpeg_path,
             )
             if not frames:
                 return ComprehensionResult(
@@ -91,9 +153,10 @@ class ComprehensionPipeline:
 
             # 3. 选择并加载 VLM
             hardware = detect_hardware()
-            model_name, backend, device = select_model(hardware, self.config)
+            model_id, backend, device = select_model(hardware, self.config)
+            model_path = resolve_model_path(model_id)
             self._vlm = self._create_engine(backend)
-            self._vlm.load_model(model_name, device)
+            self._vlm.load_model(model_path, device)
 
             # 4. 批量分析
             descriptions = self._vlm.analyze_frames(frames)
@@ -126,7 +189,7 @@ class ComprehensionPipeline:
                 visual_frames=visual_frames,
                 timeline_summary=timeline_summary,
                 merged_text=merged_text,
-                engine=f"{backend.value}/{model_name}",
+                engine=f"{backend.value}/{model_id}",
                 frame_count=len(visual_frames),
             )
 
@@ -137,32 +200,37 @@ class ComprehensionPipeline:
         finally:
             self.cleanup()
 
-    def _download_video(self, url: str) -> Optional[str]:
-        """使用 yt-dlp 下载视频文件"""
-        output_path = os.path.join(self._temp_dir, "video.%(ext)s")
-        cmd = [
-            'yt-dlp',
-            '--format', 'bestvideo+bestaudio/best',
-            '--merge-output-format', 'mp4',
-            '--output', output_path,
-            '--no-playlist',
-            '--quiet',
-            url,
-        ]
-
+    def _download_video(self, url: str, ffmpeg_path: Optional[str] = None) -> Optional[str]:
+        """使用 yt-dlp Python API 下载视频文件"""
         try:
-            result = subprocess.run(cmd, capture_output=True, timeout=600)
-            if result.returncode != 0:
-                return None
+            import yt_dlp
 
-            # 查找下载的文件
+            output_path = os.path.join(self._temp_dir, "video")
+            ydl_opts = {
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
+                'merge_output_format': 'mp4',
+                'outtmpl': output_path,
+                'noplaylist': True,
+                'quiet': True,
+                'no_warnings': True,
+            }
+            if ffmpeg_path and os.path.isabs(ffmpeg_path):
+                ydl_opts['ffmpeg_location'] = ffmpeg_path
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                # yt-dlp may output different filenames than expected
+                if info.get('_filename'):
+                    return info['_filename']
+
+            # Fallback: search temp dir for video files
             for f in os.listdir(self._temp_dir):
                 fp = os.path.join(self._temp_dir, f)
-                if os.path.isfile(fp) and f.startswith("video."):
+                if os.path.isfile(fp) and f.endswith(('.mp4', '.mkv', '.webm', '.flv')):
                     return fp
 
             return None
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except Exception:
             return None
 
     def _create_engine(self, backend) -> BaseVLMEngine:

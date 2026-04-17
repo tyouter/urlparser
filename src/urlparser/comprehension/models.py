@@ -8,9 +8,37 @@ ComprehensionResult 和 VisualFrameResult 定义在父级 models.py 中。
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from enum import Enum
+from pathlib import Path
 
 # Re-export from parent to avoid duplication
 from ..models import VisualFrameResult, ComprehensionResult
+
+# Model registry: identifier -> local filesystem path
+# Models are stored under {package_root}/models/
+_MODEL_REGISTRY = {
+    "qwen3-vl-2b-int4": "models/qwen3-vl-2b-int4",
+    "phi-4-multimodal-int4": "models/phi-4-multimodal-int4",
+    "smolvlm-2.2b-gguf-q4": "models/smolvlm-2.2b-gguf-q4",
+    "smolvlm-500m-gguf-q4": "models/smolvlm-500m-gguf-q4",
+}
+
+
+def resolve_model_path(model_id: str) -> str:
+    """解析模型标识符为本地文件系统路径"""
+    if Path(model_id).exists():
+        return model_id  # Already a valid path
+    rel = _MODEL_REGISTRY.get(model_id, model_id)
+    # Try relative to project root (parent of src/)
+    pkg_root = Path(__file__).parent.parent.parent
+    candidate = pkg_root.parent / rel
+    if candidate.exists():
+        return str(candidate)
+    # Try relative to package root (for packaged installs)
+    candidate2 = pkg_root / rel
+    if candidate2.exists():
+        return str(candidate2)
+    # Fallback: return as-is (will fail at load time with clear error)
+    return str(candidate)
 
 
 class ComprehensionMode(Enum):
@@ -101,9 +129,9 @@ def select_model(
 
 
 def _select_openvino_model(hardware: HardwareProfile) -> Tuple[str, VLMBackend, str]:
-    if hardware == HardwareProfile.INTEL_NPU:
-        return ("phi-4-multimodal-int4", VLMBackend.OPENVINO, "NPU")
-    return ("qwen3-vl-2b-int4", VLMBackend.OPENVINO, "GPU")
+    # NPU 支持仍在完善中，优先使用 iGPU (更稳定)
+    device = "GPU"
+    return ("qwen3-vl-2b-int4", VLMBackend.OPENVINO, device)
 
 
 def _select_llamacpp_model(hardware: HardwareProfile) -> Tuple[str, VLMBackend, str]:
