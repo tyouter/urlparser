@@ -74,3 +74,13 @@ Thumbs.db
 data/
 cache/
 tests/batch_transcribe.py
+
+# VLM models
+models/
+
+# Test artifacts
+test_*.jpg
+timeline_*.md
+tests/test_comprehension_v*.json
+tests/test_output.json
+tests/test_video_comprehension_output.json
