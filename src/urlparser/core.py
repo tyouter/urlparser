@@ -19,6 +19,7 @@ from .models import (
 from .parser import ParserFactory
 from .transcriber import FunASRTranscriber, WhisperTranscriber
 from .utils import detect_platform, is_video_url
+from .comprehension import ComprehensionPipeline
 
 
 class UrlParser:
@@ -121,6 +122,12 @@ class UrlParser:
                 transcription = await self._transcribe_audio(url, config.transcribe)
                 result.transcription = transcription
 
+            if is_vid and config.comprehension.enabled and result.fetch_success:
+                comprehension = await self._run_comprehension(
+                    url, config.comprehension, result.transcription
+                )
+                result.comprehension = comprehension
+
             return result
 
         finally:
@@ -165,6 +172,50 @@ class UrlParser:
 
         except Exception as e:
             return TranscriptionResult(
+                success=False,
+                error=str(e),
+            )
+
+    async def _run_comprehension(self, url, comp_config, transcription_result=None):
+        """运行视频理解管线"""
+        try:
+            from .comprehension.models import (
+                ComprehensionConfig as CompConfig,
+                ComprehensionResult as CompResult,
+            )
+
+            config = CompConfig(
+                enabled=comp_config.enabled,
+                mode=comp_config.mode,
+                engine=comp_config.engine,
+                max_frames=comp_config.max_frames,
+                scdet_threshold=comp_config.scdet_threshold,
+                language=comp_config.language,
+                temp_dir=comp_config.temp_dir,
+            )
+
+            loop = asyncio.get_event_loop()
+            pipeline = ComprehensionPipeline(config)
+            c_result = await loop.run_in_executor(
+                None,
+                lambda: pipeline.comprehend_from_url(url, transcription_result),
+            )
+
+            # Convert to models.ComprehensionResult
+            return CompResult(
+                success=c_result.success,
+                mode=c_result.mode,
+                visual_frames=c_result.visual_frames,
+                timeline_summary=c_result.timeline_summary,
+                merged_text=c_result.merged_text,
+                engine=c_result.engine,
+                frame_count=c_result.frame_count,
+                error=c_result.error,
+            )
+
+        except Exception as e:
+            from .comprehension.models import ComprehensionResult as CompResult
+            return CompResult(
                 success=False,
                 error=str(e),
             )

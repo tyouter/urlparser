@@ -19,6 +19,9 @@ urlparser CLI 接口
     # 使用用户 Chrome
     python -m urlparser parse https://xiaohongshu.com/xxx --user-chrome
 
+    # 在线解析（LLM API，无需浏览器/yt-dlp）
+    python -m urlparser parse https://www.bilibili.com/video/BVxxx --parse-mode online
+
     # 缓存管理
     python -m urlparser cache stats
     python -m urlparser cache clear
@@ -87,6 +90,12 @@ def _add_parse_parser(subparsers):
     p.add_argument('--output', '-o', help='输出文件路径')
     p.add_argument('--format', '-f', default='markdown', choices=['markdown', 'json'], help='输出格式')
     p.add_argument('--no-cache', action='store_true', help='跳过缓存')
+    p.add_argument('--parse-mode', default='local', choices=['local', 'online'], help='解析模式：local=yt-dlp+浏览器, online=LLM API')
+    p.add_argument('--comprehension', '-c', choices=['audio', 'video', 'audio_video'],
+                   help='视频理解模式')
+    p.add_argument('--comp-engine', default='auto',
+                   choices=['auto', 'openvino', 'llamacpp'], help='VLM 引擎')
+    p.add_argument('--comp-max-frames', type=int, default=50, help='最大分析帧数')
 
 
 def _add_parse_batch_parser(subparsers):
@@ -99,6 +108,7 @@ def _add_parse_batch_parser(subparsers):
     p.add_argument('--output-dir', '-o', default='./parsed_results', help='输出目录')
     p.add_argument('--concurrent', '-c', type=int, default=3, help='并发数')
     p.add_argument('--no-cache', action='store_true', help='跳过缓存')
+    p.add_argument('--parse-mode', default='local', choices=['local', 'online'], help='解析模式')
 
 
 def _add_cache_parser(subparsers):
@@ -225,7 +235,17 @@ def _add_install_skill_parser(subparsers):
 
 async def cmd_parse(args):
     from .core import UrlParser
-    from .config import ParseConfig, TranscribeConfig, BrowserConfig
+    from .config import ParseConfig, TranscribeConfig, BrowserConfig, ComprehensionConfig
+
+    comp_config = None
+    if args.comprehension:
+        mode_map = {'audio': 'audio_only', 'video': 'video_only', 'audio_video': 'audio_video'}
+        comp_config = ComprehensionConfig(
+            enabled=True,
+            mode=mode_map.get(args.comprehension, 'audio_video'),
+            engine=args.comp_engine,
+            max_frames=args.comp_max_frames,
+        )
 
     config = ParseConfig(
         transcribe=TranscribeConfig(
@@ -239,6 +259,8 @@ async def cmd_parse(args):
             user_data_dir=args.user_data_dir,
             headless=not args.no_headless,
         ),
+        parse_mode=args.parse_mode,
+        comprehension=comp_config or ComprehensionConfig(),
     )
 
     async with UrlParser(config) as parser:
@@ -277,6 +299,7 @@ async def cmd_parse_batch(args):
             cookies_file=args.cookies,
             use_user_chrome=args.user_chrome,
         ),
+        parse_mode=args.parse_mode,
     )
 
     output_dir = ensure_dir(args.output_dir)

@@ -67,6 +67,38 @@ DEPENDENCIES = {
         description="高效 Whisper 转录引擎",
     ),
 
+    # 理解依赖
+    "openvino": Dependency(
+        name="openvino",
+        type=DependencyType.PYTHON_PACKAGE,
+        pip_name="openvino",
+        description="Intel OpenVINO 推理引擎",
+    ),
+    "openvino_genai": Dependency(
+        name="openvino_genai",
+        type=DependencyType.PYTHON_PACKAGE,
+        pip_name="openvino-genai",
+        description="OpenVINO 生成式 AI 扩展",
+    ),
+    "llama_cpp": Dependency(
+        name="llama_cpp",
+        type=DependencyType.PYTHON_PACKAGE,
+        pip_name="llama-cpp-python",
+        description="llama.cpp Python 绑定",
+    ),
+    "PIL": Dependency(
+        name="PIL",
+        type=DependencyType.PYTHON_PACKAGE,
+        pip_name="pillow",
+        description="图像处理库",
+    ),
+    "psutil": Dependency(
+        name="psutil",
+        type=DependencyType.PYTHON_PACKAGE,
+        pip_name="psutil",
+        description="系统进程/资源监控",
+    ),
+
     # 可选依赖
     "browser-use": Dependency(
         name="browser-use",
@@ -438,6 +470,44 @@ def ensure_core_dependencies(auto_install: bool = True) -> bool:
         print("\n核心依赖检查完成")
     else:
         print("\n核心依赖检查完成，部分依赖缺失")
+
+    return all_ok
+
+
+def ensure_comprehension_dependencies(auto_install: bool = True) -> bool:
+    """
+    确保视频理解依赖已安装
+
+    Args:
+        auto_install: 是否自动安装
+
+    Returns:
+        是否所有必要依赖都已安装
+    """
+    print("\n检查视频理解依赖...")
+
+    deps = ["psutil", "PIL", "openvino", "openvino_genai", "llama_cpp"]
+    results = {}
+
+    for name in deps:
+        installed, version = ensure_dependency(name, auto_install)
+        results[name] = installed
+
+    # 至少需要 openvino 或 llama_cpp 之一
+    has_engine = results.get("openvino", False) or results.get("llama_cpp", False)
+
+    all_ok = results.get("psutil", False) and results.get("PIL", False) and has_engine
+
+    if all_ok:
+        print("\n视频理解依赖检查完成，功能可用")
+    else:
+        print("\n视频理解依赖检查完成，部分依赖缺失")
+        if not results.get("psutil", False):
+            print("  - psutil 缺失")
+        if not results.get("PIL", False):
+            print("  - Pillow 缺失")
+        if not has_engine:
+            print("  - 推理引擎缺失 (openvino 或 llama-cpp-python)")
 
     return all_ok
 

@@ -77,10 +77,11 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 # =============================================================================
 
 from .core import parse, parse_batch, parse_sync, UrlParser
-from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig
+from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ComprehensionConfig
 from .models import (
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult, ArticleMetadata,
+    ComprehensionResult, VisualFrameResult,
 )
 from .fetcher import (
     BaseFetcher, FetchResult, FetchConfig, FetchStrategy,
@@ -98,6 +99,7 @@ from .transcriber import (
     BaseTranscriber, TranscriptionResult as TranscriberResult,
     FunASRTranscriber, WhisperTranscriber,
     YtdlpExtractor, extract_video_info,
+    OnlineVideoFetcher, fetch_video_online,
 )
 from .storage import (
     ResultCache, CacheEntry, ResultStorage,
@@ -119,6 +121,7 @@ from .utils import (
 from .dependency_installer import (
     ensure_dependency, ensure_all_dependencies,
     ensure_transcribe_dependencies, ensure_core_dependencies,
+    ensure_comprehension_dependencies,
     is_package_installed, is_ffmpeg_installed,
 )
 
@@ -133,6 +136,7 @@ __all__ = [
     'ScrollConfig',
     'TranscribeConfig',
     'BatchTranscribeConfig',
+    'ComprehensionConfig',
 
     'ParseResult',
     'PlatformType',
@@ -140,6 +144,8 @@ __all__ = [
     'VideoMetadata',
     'TranscriptionResult',
     'ArticleMetadata',
+    'ComprehensionResult',
+    'VisualFrameResult',
 
     'BaseFetcher',
     'FetchResult',
@@ -169,6 +175,8 @@ __all__ = [
     'WhisperTranscriber',
     'YtdlpExtractor',
     'extract_video_info',
+    'OnlineVideoFetcher',
+    'fetch_video_online',
 
     'ResultCache',
     'CacheEntry',
@@ -220,7 +228,8 @@ __all__ = [
     'ensure_all_dependencies',
     'ensure_transcribe_dependencies',
     'ensure_core_dependencies',
+    'ensure_comprehension_dependencies',
     'is_package_installed',
     'is_ffmpeg_installed',
 ]
-__version__ = '3.1.0'
+__version__ = '3.3.0'

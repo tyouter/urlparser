@@ -39,6 +39,18 @@ class TranscribeConfig:
 
 
 @dataclass
+class ComprehensionConfig:
+    """视频理解配置"""
+    enabled: bool = False
+    mode: str = "audio_video"       # "audio_only" | "video_only" | "audio_video"
+    engine: str = "auto"            # "auto" | "openvino" | "llamacpp"
+    max_frames: int = 50
+    scdet_threshold: int = 10
+    language: str = "zh"
+    temp_dir: Optional[str] = None
+
+
+@dataclass
 class ParseConfig:
     """
     统一解析配置
@@ -56,9 +68,11 @@ class ParseConfig:
     browser: BrowserConfig = field(default_factory=BrowserConfig)
     scroll: ScrollConfig = field(default_factory=ScrollConfig)
     transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
+    comprehension: ComprehensionConfig = field(default_factory=ComprehensionConfig)
 
     expand_full_text: bool = True
     close_login_popup: bool = True
+    parse_mode: str = "local"  # "local" | "online"
 
     @classmethod
     def simple(cls, **kwargs):
@@ -76,6 +90,17 @@ class ParseConfig:
         """使用 Cookie 的配置"""
         browser = BrowserConfig(cookies_file=cookies_file)
         return cls(browser=browser, **kwargs)
+
+    @classmethod
+    def with_online_parse(cls, **kwargs):
+        """使用在线 LLM 解析的配置"""
+        return cls(parse_mode="online", **kwargs)
+
+    @classmethod
+    def with_comprehension(cls, mode: str = "audio_video", engine: str = "auto", **kwargs):
+        """启用视频理解"""
+        comprehension = ComprehensionConfig(enabled=True, mode=mode, engine=engine)
+        return cls(comprehension=comprehension, **kwargs)
 
     @classmethod
     def full_feature(cls, **kwargs):
@@ -107,6 +132,7 @@ class ParseConfig:
             expand_full_text=self.expand_full_text,
             close_login_popup=self.close_login_popup,
             stealth_mode=self.browser.stealth_mode,
+            parse_mode=self.parse_mode,
         )
 
 
@@ -118,6 +144,7 @@ __all__ = [
     'BrowserConfig',
     'ScrollConfig',
     'TranscribeConfig',
+    'ComprehensionConfig',
     'ParseConfig',
     'BatchTranscribeConfig',
 ]

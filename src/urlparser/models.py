@@ -111,6 +111,70 @@ class TranscriptionResult:
 
 
 @dataclass
+class VisualFrameResult:
+    """单帧 VLM 分析结果"""
+    timestamp: float = 0.0          # 秒
+    frame_path: str = ""            # 临时文件路径（已清理后为空）
+    description: str = ""           # VLM 描述
+    confidence: float = 1.0         # 置信度
+
+    def to_dict(self) -> Dict:
+        return {
+            'timestamp': self.timestamp,
+            'description': self.description,
+            'confidence': self.confidence,
+        }
+
+
+@dataclass
+class ComprehensionResult:
+    """视频理解结果"""
+    success: bool = False
+    mode: str = "audio_video"       # "audio_only" | "video_only" | "audio_video"
+    visual_frames: List[VisualFrameResult] = field(default_factory=list)
+    timeline_summary: str = ""
+    merged_text: str = ""
+    engine: str = ""
+    frame_count: int = 0
+    error: Optional[str] = None
+
+    @property
+    def has_content(self) -> bool:
+        return bool(self.merged_text or self.timeline_summary)
+
+    def to_dict(self) -> Dict:
+        return {
+            'success': self.success,
+            'mode': self.mode,
+            'frame_count': self.frame_count,
+            'engine': self.engine,
+            'timeline_summary': self.timeline_summary,
+            'merged_text': self.merged_text,
+            'error': self.error,
+        }
+
+    def to_markdown(self) -> str:
+        """格式化为 Markdown"""
+        if not self.success:
+            return f"视频理解失败: {self.error or '未知错误'}"
+
+        parts = [f"## 视频理解 ({self.mode}, engine={self.engine})\n\n"]
+
+        if self.merged_text:
+            parts.append(f"{self.merged_text}\n\n")
+        elif self.timeline_summary:
+            parts.append(f"### 摘要\n\n{self.timeline_summary}\n\n")
+
+        if self.visual_frames:
+            parts.append(f"### 关键帧时间轴 ({self.frame_count} 帧)\n\n")
+            for vf in self.visual_frames:
+                h, m, s = int(vf.timestamp // 3600), int((vf.timestamp % 3600) // 60), int(vf.timestamp % 60)
+                parts.append(f"- [{h:02d}:{m:02d}:{s:02d}] {vf.description}\n")
+
+        return ''.join(parts)
+
+
+@dataclass
 class ArticleMetadata:
     """文章元数据"""
     votes: str = ""
@@ -161,6 +225,7 @@ class ParseResult:
     video_metadata: VideoMetadata = field(default_factory=VideoMetadata)
     article_metadata: ArticleMetadata = field(default_factory=ArticleMetadata)
     transcription: TranscriptionResult = field(default_factory=TranscriptionResult)
+    comprehension: 'ComprehensionResult' = field(default_factory=ComprehensionResult)
 
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -182,12 +247,16 @@ class ParseResult:
         return self.transcription and self.transcription.success
 
     @property
+    def has_comprehension(self) -> bool:
+        return self.comprehension and self.comprehension.success
+
+    @property
     def content_length(self) -> int:
         return len(self.content or '')
 
     @property
     def full_text(self) -> str:
-        """获取完整文本（内容 + 转录）"""
+        """获取完整文本（内容 + 转录 + 理解）"""
         parts = []
         if self.title:
             parts.append(f"# {self.title}\n")
@@ -195,6 +264,8 @@ class ParseResult:
             parts.append(self.content)
         if self.has_transcription and self.transcription.text:
             parts.append(f"\n\n{self.transcription.to_markdown()}")
+        if self.has_comprehension and self.comprehension.merged_text:
+            parts.append(f"\n\n{self.comprehension.to_markdown()}")
         return '\n'.join(parts)
 
     def to_dict(self) -> Dict:
@@ -213,6 +284,7 @@ class ParseResult:
             'has_transcription': self.has_transcription,
             'video_metadata': self.video_metadata.to_dict(),
             'transcription': self.transcription.to_dict(),
+            'comprehension': self.comprehension.to_dict(),
             'metadata': self.metadata,
             'fetch_success': self.fetch_success,
             'error': self.error,
@@ -257,6 +329,9 @@ class ParseResult:
 
         if self.has_transcription:
             lines.append(self.transcription.to_markdown())
+
+        if self.has_comprehension:
+            lines.append(self.comprehension.to_markdown())
 
         if self.metadata:
             lines.append("## 元数据")
