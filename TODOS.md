@@ -2,21 +2,20 @@
 
 ## High Priority
 
-- [ ] **Fix VLM GPU output garbled** - `VLMPipeline` with `device='GPU'` returns binary-looking text instead of Chinese descriptions. CPU works fine. Need to test GPU directly and fix decoding, or use `device='CPU'` as default for now.
+(none - all high priority items completed)
 
 ## Medium Priority
 
 - [ ] **Install MSVC / Visual C++ Build Tools** (optional) - Required for `llama-cpp-python` compilation. Alternative: find pre-built Windows wheels. Provides CPU fallback when OpenVINO GPU is unavailable.
 - [ ] **Download phi-4-multimodal-int4 model** (optional) - For NPU inference. Current NPU plugin crashes with "Accessing out-of-range dimension" — may need model update or OpenVINO version fix.
-- [ ] **Add GPU device validation** - Test `VLMPipeline` on GPU during `load_model()` and fall back to CPU if output is invalid.
 - [ ] **Performance benchmark** - Measure inference time per frame on CPU vs GPU for Qwen3-VL-2B INT4.
+- [ ] **Fix GPU clBuildProgram failure** - Intel iGPU OpenVINO clBuildProgram fails. Root cause: OpenCL compiler issue. CPU fallback works fine.
 
 ## Low Priority
 
 - [ ] **Add `--comp-device` CLI flag** - Allow manual device override (CPU/GPU/NPU).
 - [ ] **Streaming output** - Add streamer callback to `generate()` for real-time frame descriptions.
 - [ ] **Model auto-download** - Detect missing models in `resolve_model_path()` and offer to download from HuggingFace.
-- [ ] **Audio+Video mode end-to-end test** - Test `--comprehension audio_video` with FunASR transcription + VLM timeline merge.
 - [ ] **Clean up test files** - Remove `tests/test_comprehension_v*.json` files and `test_frame.jpg`, `test_red_frame.jpg` from root.
 
 ## Completed
@@ -35,3 +34,8 @@
 - [x] Wire comprehension into `core.py` `_do_parse()`
 - [x] Add CLI flags (`--comprehension`, `--comp-engine`, `--comp-max-frames`)
 - [x] Update `SKILL.md` and `CLAUDE.md` with comprehension docs
+- [x] **Fix VLM GPU output garbled** - Added `_validate_gpu_or_fallback()` in `vlm_engine.py`, GPU test fails → auto fallback to CPU
+- [x] **Add GPU device validation** - Test `VLMPipeline` on GPU during `load_model()` and fall back to CPU if output is invalid
+- [x] **Audio+Video mode end-to-end test** - Tested `--comprehension audio_video` with FunASR transcription + VLM timeline merge
+- [x] **Full test suite with Bilibili URL** - All 6 test categories passed (hardware detection, FunASR, Whisper, VLM video_only, VLM audio_video, parse full pipeline)
+- [x] **Export `resolve_model_path` from comprehension __init__.py**

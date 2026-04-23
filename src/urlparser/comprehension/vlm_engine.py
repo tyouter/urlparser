@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Dict
 from pathlib import Path
 
+import re
 import numpy as np
 from PIL import Image
 
@@ -15,6 +16,8 @@ _DEFAULT_PROMPT = (
     "请描述这个视频帧的内容，包括场景类型、主要物体、人物动作、文字信息。"
     "用中文简要回答，不超过100字。"
 )
+
+_GARBLED_PATTERN = re.compile(r'^[\s.0-9]{10,}$')
 
 
 def _load_image_tensor(image_path: str):
@@ -71,14 +74,56 @@ class OpenVINOEngine(BaseVLMEngine):
             from openvino import Core
             from openvino_genai import VLMPipeline
 
+            self._model_name = model_name
+            self._device = device
+
+            if device.upper() == "GPU":
+                device = self._validate_gpu_or_fallback(model_name, device)
+
             self._model = VLMPipeline(model_name, device=device)
             self._loaded = True
-            self._model_name = model_name
             self._device = device
         except ImportError as e:
             raise ImportError(
                 "OpenVINO 未安装。请运行: pip install openvino openvino-genai"
             ) from e
+
+    def _validate_gpu_or_fallback(self, model_name: str, device: str) -> str:
+        from openvino import Core
+
+        core = Core()
+        available = core.available_devices
+
+        if "GPU" not in available:
+            print(f"[VLM] GPU not available, falling back to CPU. Devices: {available}")
+            return "CPU"
+
+        try:
+            from openvino_genai import VLMPipeline as _VLMPipeline, ChatHistory as _ChatHistory
+
+            print(f"[VLM] Testing GPU output quality...")
+            test_pipeline = _VLMPipeline(model_name, device="GPU")
+            test_history = _ChatHistory()
+            test_history.append({"role": "user", "content": "你好"})
+
+            test_result = test_pipeline.generate(
+                test_history,
+                max_new_tokens=50,
+            )
+            test_text = str(test_result.texts[0]).strip()
+
+            if _GARBLED_PATTERN.match(test_text) or len(test_text) < 2:
+                print(f"[VLM] GPU output garbled ('{test_text[:50]}'), falling back to CPU")
+                del test_pipeline
+                return "CPU"
+
+            print(f"[VLM] GPU validation passed: '{test_text[:50]}'")
+            del test_pipeline
+            return "GPU"
+
+        except Exception as e:
+            print(f"[VLM] GPU test failed ({e}), falling back to CPU")
+            return "CPU"
 
     def analyze_frame(self, image_path: str, prompt: str = _DEFAULT_PROMPT) -> str:
         if not self._loaded:

@@ -58,6 +58,7 @@ class HardwareProfile(Enum):
     """硬件配置文件"""
     INTEL_NPU = "intel_npu"
     INTEL_IGPU = "intel_igpu"
+    NVIDIA_GPU = "nvidia_gpu"
     CPU_HIGH = "cpu_high"
     CPU_LOW = "cpu_low"
 
@@ -81,24 +82,36 @@ def detect_hardware() -> HardwareProfile:
 
     total_ram_gb = _psutil.virtual_memory().total / (1024 ** 3)
 
-    # 检查 NPU / OpenVINO 可用性
     has_npu = False
     has_igpu = False
+    has_nvidia_gpu = False
     try:
         import openvino as ov
         core = ov.Core()
         devices = core.available_devices
         has_npu = 'NPU' in devices
-        has_igpu = 'GPU' in devices
+        if 'GPU' in devices:
+            gpu_name = core.get_property("GPU", "FULL_DEVICE_NAME")
+            has_nvidia_gpu = bool(gpu_name and "NVIDIA" in gpu_name.upper())
+            has_igpu = not has_nvidia_gpu
     except (ImportError, Exception):
         pass
 
+    if not has_nvidia_gpu:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                has_nvidia_gpu = True
+        except ImportError:
+            pass
+
     if has_npu:
         return HardwareProfile.INTEL_NPU
+    if has_nvidia_gpu:
+        return HardwareProfile.NVIDIA_GPU
     if has_igpu:
         return HardwareProfile.INTEL_IGPU
 
-    # 按 RAM 决定 CPU 配置
     if total_ram_gb >= 16:
         return HardwareProfile.CPU_HIGH
     return HardwareProfile.CPU_LOW
@@ -122,15 +135,19 @@ def select_model(
         return _select_llamacpp_model(hardware)
 
     # 自动选择：优先 OpenVINO
-    if hardware in (HardwareProfile.INTEL_NPU, HardwareProfile.INTEL_IGPU):
+    if hardware in (HardwareProfile.INTEL_NPU, HardwareProfile.INTEL_IGPU, HardwareProfile.NVIDIA_GPU):
         return _select_openvino_model(hardware)
     else:
         return _select_llamacpp_model(hardware)
 
 
 def _select_openvino_model(hardware: HardwareProfile) -> Tuple[str, VLMBackend, str]:
-    # NPU 支持仍在完善中，优先使用 iGPU (更稳定)
-    device = "GPU"
+    if hardware == HardwareProfile.NVIDIA_GPU:
+        device = "GPU"
+    elif hardware == HardwareProfile.INTEL_IGPU:
+        device = "GPU"
+    else:
+        device = "GPU"
     return ("qwen3-vl-2b-int4", VLMBackend.OPENVINO, device)
 
 

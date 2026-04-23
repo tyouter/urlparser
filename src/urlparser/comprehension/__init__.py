@@ -7,7 +7,7 @@
 from .models import (
     ComprehensionMode, VLMBackend, HardwareProfile,
     ComprehensionConfig,
-    detect_hardware, select_model,
+    detect_hardware, select_model, resolve_model_path,
 )
 # Re-export result types from parent models
 from ..models import VisualFrameResult, ComprehensionResult
@@ -19,7 +19,7 @@ from .writer import TimelineWriter
 __all__ = [
     'ComprehensionMode', 'VLMBackend', 'HardwareProfile',
     'ComprehensionConfig',
-    'detect_hardware', 'select_model',
+    'detect_hardware', 'select_model', 'resolve_model_path',
     'VisualFrameResult', 'ComprehensionResult',
     'FrameExtractor', 'BaseVLMEngine', 'OpenVINOEngine', 'LlamaCppEngine',
     'ComprehensionPipeline', 'TimelineWriter',
