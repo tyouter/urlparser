@@ -16,6 +16,7 @@ class FetchStrategy(Enum):
     COOKIE = "cookie"
     USER_CHROME = "user_chrome"
     BROWSER_USE = "browser_use"
+    BB_BROWSER = "bb_browser"
 
 
 @dataclass

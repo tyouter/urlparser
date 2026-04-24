@@ -12,6 +12,7 @@ from .playwright_fetcher import PlaywrightFetcher
 from .cookie_fetcher import CookieFetcher
 from .user_chrome_fetcher import UserChromeFetcher
 from .browser_use_fetcher import BrowserUseFetcher
+from .bb_browser_fetcher import BbBrowserFetcher
 
 
 class FetcherFactory:
@@ -35,6 +36,7 @@ class FetcherFactory:
         FetchStrategy.COOKIE: CookieFetcher,
         FetchStrategy.USER_CHROME: UserChromeFetcher,
         FetchStrategy.BROWSER_USE: BrowserUseFetcher,
+        FetchStrategy.BB_BROWSER: BbBrowserFetcher,
     }
 
     @classmethod
@@ -74,6 +76,12 @@ class FetcherFactory:
         """
         根据 URL 和配置自动选择最佳策略
 
+        优先级:
+        1. bb-browser (支持的平台 + 已安装)
+        2. Cookie (有 cookies_file)
+        3. UserChrome (有 user_data_dir)
+        4. Playwright (默认)
+
         Args:
             url: 目标 URL
             config: 读取配置
@@ -82,6 +90,12 @@ class FetcherFactory:
             BaseFetcher 实例
         """
         config = config or FetchConfig()
+
+        bb_fetcher = BbBrowserFetcher(config)
+        if bb_fetcher._check_bb_browser():
+            adapter_args = BbBrowserFetcher._extract_adapter_and_args(url)
+            if adapter_args:
+                return bb_fetcher
 
         if config.cookies_file:
             return CookieFetcher(config)

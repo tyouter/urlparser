@@ -6,6 +6,7 @@ URL 读取层
 - CookieFetcher: Cookie 认证读取
 - UserChromeFetcher: 用户浏览器读取
 - BrowserUseFetcher: AI 反爬读取
+- BbBrowserFetcher: bb-browser CDP 读取（复用登录态）
 """
 
 from .base import BaseFetcher, FetchResult, FetchConfig, FetchStrategy
@@ -13,6 +14,7 @@ from .playwright_fetcher import PlaywrightFetcher
 from .cookie_fetcher import CookieFetcher
 from .user_chrome_fetcher import UserChromeFetcher
 from .browser_use_fetcher import BrowserUseFetcher
+from .bb_browser_fetcher import BbBrowserFetcher
 from .factory import FetcherFactory
 
 __all__ = [
@@ -24,5 +26,6 @@ __all__ = [
     'CookieFetcher',
     'UserChromeFetcher',
     'BrowserUseFetcher',
+    'BbBrowserFetcher',
     'FetcherFactory',
 ]

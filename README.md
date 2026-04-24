@@ -9,7 +9,7 @@
 
 - **自动平台识别** — 支持知乎、B站、YouTube、微信、小红书、GitHub 等
 - **智能内容提取** — 标题、作者、正文、视频元数据
-- **反爬绕过** — Stealth 模式、Cookie 认证、用户浏览器、AI 自动化
+- **自适应浏览器内容访问** — Stealth 模式、Cookie 认证、用户浏览器、AI 自动化
 - **视频转录** — FunASR（中文优化）/ Whisper（99 语言）
 - **双层缓存** — 内存 + 磁盘，避免重复解析
 - **批量处理** — 并发解析，进度追踪
@@ -38,7 +38,7 @@ pip install yt-dlp ffmpeg
 # 音频转录
 pip install funasr faster-whisper torch
 
-# AI 自动化反爬
+# AI 自适应浏览器内容访问
 pip install browser-use
 ```
 
@@ -100,7 +100,7 @@ urlparser transcribe audio.mp3 --engine funasr
 | B站 | 视频 | 视频信息、转录支持 |
 | YouTube | 视频 | 多语言转录 |
 | 微信公众号 | 文章 | Cookie 认证 |
-| 小红书 | 笔记 | 反爬绕过 |
+| 小红书 | 笔记 | 自适应浏览器内容访问 |
 | GitHub | 仓库/Issue | README/代码提取 |
 | 通用网页 | 文章 | 智能内容提取 |
 
@@ -132,14 +132,14 @@ config = ParseConfig(
 )
 ```
 
-## 反爬策略
+## 自适应浏览器内容访问
 
 | 策略 | 适用场景 | 参数 |
 |------|---------|------|
 | Stealth 模式 | 大部分公开页面 | 默认启用 |
 | Cookie 认证 | 需要登录的页面 | `cookies_file` |
-| 用户浏览器 | 强反爬站点 | `use_user_chrome=True` |
-| AI 自动化 | 极端反爬 | 需要 DEEPSEEK_API_KEY |
+| 用户浏览器 | 强规则限制站点 | `use_user_chrome=True` |
+| AI 自动化 | 极端规则限制 | 需要 DEEPSEEK_API_KEY |
 
 ```python
 # Cookie 认证
