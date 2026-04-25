@@ -18,17 +18,19 @@ class PlatformType(Enum):
     WEIXIN = "weixin"
     XIAOHONGSHU = "xiaohongshu"
     GITHUB = "github"
+    DRIBBBLE = "dribbble"
     GENERIC = "generic"
     UNKNOWN = "unknown"
 
 
 class ContentType(Enum):
     """内容类型"""
-    ARTICLE = "articles"
+    ARTICLE = "article"
     VIDEO = "video"
     WEBPAGE = "webpage"
     REPOSITORY = "repository"
     NOTE = "note"
+    IDEA = "idea"
     UNKNOWN = "unknown"
 
 
@@ -353,7 +355,12 @@ def create_result_from_parser(parser_result) -> ParseResult:
     }
 
     content_type_map = {
-        'articles': CT.ARTICLE, 'video': CT.VIDEO, 'webpage': CT.WEBPAGE,
+        'article': CT.ARTICLE, 'articles': CT.ARTICLE,
+        'video': CT.VIDEO, 'videos': CT.VIDEO,
+        'webpage': CT.WEBPAGE, 'webpages': CT.WEBPAGE,
+        'note': CT.NOTE, 'notes': CT.NOTE,
+        'idea': CT.IDEA, 'ideas': CT.IDEA,
+        'repository': CT.REPOSITORY,
     }
 
     pt = platform_map.get(getattr(parser_result, 'platform', ''), PT.UNKNOWN)

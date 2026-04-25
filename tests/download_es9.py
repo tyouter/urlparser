@@ -2,7 +2,7 @@ import os
 os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 import yt_dlp
 
-out_dir = r'D:\projects\claude\urlparser\tests\ES9新车发布会'
+out_dir = os.path.join(os.path.dirname(__file__), 'ES9新车发布会')
 os.makedirs(out_dir, exist_ok=True)
 
 ydl_opts = {
@@ -12,8 +12,6 @@ ydl_opts = {
     'outtmpl': os.path.join(out_dir, 'es9_audio.%(ext)s'),
     'cookiesfrombrowser': ('chrome',),
 }
-if os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-    ydl_opts['ffmpeg_location'] = 'C:/ffmpeg/bin/ffmpeg.exe'
 
 try:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -37,8 +35,6 @@ except Exception as e:
         'outtmpl': os.path.join(out_dir, 'es9_audio.%(ext)s'),
         'extractor_args': {'bilibili': {'wbi_sign': True}},
     }
-    if os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-        ydl_opts2['ffmpeg_location'] = 'C:/ffmpeg/bin/ffmpeg.exe'
     try:
         with yt_dlp.YoutubeDL(ydl_opts2) as ydl:
             info = ydl.extract_info('https://www.bilibili.com/video/BV1d5QvBnENK/', download=True)

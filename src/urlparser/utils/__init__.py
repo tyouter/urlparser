@@ -13,6 +13,7 @@ from .media_utils import (
     extract_audio_segment, check_ffmpeg_available,
     AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, MEDIA_EXTENSIONS,
 )
+from .ffmpeg_utils import find_ffmpeg, find_ffprobe
 
 __all__ = [
     'URLNormalizer',

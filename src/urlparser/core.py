@@ -42,6 +42,12 @@ class UrlParser:
         self.config = config or ParseConfig()
         self._fetcher = None
         self._transcriber = None
+        self._cache = None
+        try:
+            from .storage import ResultCache
+            self._cache = ResultCache()
+        except Exception:
+            pass
 
     async def parse(
         self,
@@ -62,6 +68,17 @@ class UrlParser:
         """
         cfg = config or self.config
 
+        force_refresh = kwargs.pop('force_refresh', False)
+
+        # Check cache before parsing
+        if not force_refresh and self._cache:
+            try:
+                cached = await self._cache.get(url)
+                if cached is not None:
+                    return ParseResult(**cached) if isinstance(cached, dict) else cached
+            except Exception:
+                pass
+
         if kwargs.get('enable_transcribe'):
             cfg = deepcopy(cfg)
             cfg.transcribe.enabled = True
@@ -79,6 +96,14 @@ class UrlParser:
         try:
             result = await self._do_parse(url, cfg)
             result.parse_time = round(time.time() - start_time, 2)
+
+            # Write to cache on success
+            if result.fetch_success and self._cache:
+                try:
+                    await self._cache.set(result.to_dict(), url=url)
+                except Exception:
+                    pass
+
             return result
 
         except Exception as e:

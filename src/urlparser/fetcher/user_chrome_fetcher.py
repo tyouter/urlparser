@@ -41,6 +41,7 @@ class UserChromeFetcher(PlaywrightFetcher):
         if not user_data_dir:
             default_paths = [
                 Path.home() / 'AppData' / 'Local' / 'Google' / 'Chrome' / 'User Data',
+                Path.home() / 'Library' / 'Application Support' / 'Google' / 'Chrome',
                 Path.home() / '.config' / 'google-chrome',
             ]
             for p in default_paths:

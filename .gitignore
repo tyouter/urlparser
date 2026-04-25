@@ -88,3 +88,4 @@ tests/test_comprehension_v*.json
 tests/test_output.json
 tests/test_video_comprehension_output.json
 tests/multi_platform/test_audio.wav
+tests/ES9*/

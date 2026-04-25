@@ -54,24 +54,42 @@ urlparser - 通用 URL 资源解析器
 """
 
 # =============================================================================
+# Logging setup - prevent "No handler found" warnings in library mode
+# =============================================================================
+import logging
+
+logging.getLogger('urlparser').addHandler(logging.NullHandler())
+
+# =============================================================================
 # CRITICAL: Set cache directories BEFORE any imports to prevent re-downloading
 # =============================================================================
 import os
 from pathlib import Path
 
-# ModelScope cache for FunASR models
-_modelscope_cache = Path.home() / '.cache' / 'modelscope'
-_modelscope_cache.mkdir(parents=True, exist_ok=True)
-os.environ['MODELSCOPE_CACHE'] = str(_modelscope_cache)
+_env_initialized = False
 
-# HuggingFace cache for Whisper models
-_hf_cache = Path.home() / '.cache' / 'huggingface'
-_hf_cache.mkdir(parents=True, exist_ok=True)
-os.environ['HF_HOME'] = str(_hf_cache)
-os.environ['HUGGINGFACE_HUB_CACHE'] = str(_hf_cache / 'hub')
+def _ensure_env():
+    """Set cache directories lazily, only once."""
+    global _env_initialized
+    if _env_initialized:
+        return
+    _env_initialized = True
 
-# OpenMP workaround for Windows
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+    # ModelScope cache for FunASR models
+    _modelscope_cache = Path.home() / '.cache' / 'modelscope'
+    _modelscope_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault('MODELSCOPE_CACHE', str(_modelscope_cache))
+
+    # HuggingFace cache for Whisper models
+    _hf_cache = Path.home() / '.cache' / 'huggingface'
+    _hf_cache.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault('HF_HOME', str(_hf_cache))
+    os.environ.setdefault('HUGGINGFACE_HUB_CACHE', str(_hf_cache / 'hub'))
+
+    # OpenMP workaround for Windows
+    os.environ.setdefault('KMP_DUPLICATE_LIB_OK', 'TRUE')
+
+_ensure_env()
 # =============================================================================
 # End of cache setup - now imports can proceed
 # =============================================================================
@@ -83,34 +101,6 @@ from .models import (
     VideoMetadata, TranscriptionResult, ArticleMetadata,
     ComprehensionResult, VisualFrameResult,
 )
-from .fetcher import (
-    BaseFetcher, FetchResult, FetchConfig, FetchStrategy,
-    PlaywrightFetcher, CookieFetcher, UserChromeFetcher, BrowserUseFetcher,
-    FetcherFactory,
-)
-from .parser import (
-    BaseParser, VideoParser, ArticleParser,
-    ParseResult as ParserParseResult,
-    ParserConfig, ParserFactory, ParserRegistry,
-    ZhihuParser, XiaohongshuParser, BilibiliParser, YoutubeParser,
-    WeixinParser, GithubParser, GenericParser,
-)
-from .transcriber import (
-    BaseTranscriber, TranscriptionResult as TranscriberResult,
-    FunASRTranscriber, WhisperTranscriber,
-    YtdlpExtractor, extract_video_info,
-    OnlineVideoFetcher, fetch_video_online,
-)
-from .storage import (
-    ResultCache, CacheEntry, ResultStorage,
-    SourceDocumentManager, StateManager, ProcessStatus, ResourceState,
-)
-from .batch_transcriber import (
-    BatchTranscriber, BatchTranscribeConfig, BatchResult, FileResult,
-    MediaScanner, MediaFileInfo, ScanResult,
-    SegmentHandler, SegmentationConfig,
-    TranscriptionWriter, WriterConfig,
-)
 from .utils import (
     URLNormalizer, normalize_url, hash_url, detect_platform, is_video_url,
     clean_text, remove_duplicate_lines, extract_main_content,
@@ -118,12 +108,65 @@ from .utils import (
     is_audio_file, is_video_file, is_media_file, get_media_duration,
     format_duration, format_duration_detailed, file_size_str, list_files,
 )
-from .dependency_installer import (
-    ensure_dependency, ensure_all_dependencies,
-    ensure_transcribe_dependencies, ensure_core_dependencies,
-    ensure_comprehension_dependencies,
-    is_package_installed, is_ffmpeg_installed,
-)
+
+# Optional imports - these may fail if optional dependencies are not installed
+try:
+    from .fetcher import (
+        BaseFetcher, FetchResult, FetchConfig, FetchStrategy,
+        PlaywrightFetcher, CookieFetcher, UserChromeFetcher, BrowserUseFetcher,
+        FetcherFactory,
+    )
+except ImportError:
+    pass
+
+try:
+    from .parser import (
+        BaseParser, VideoParser, ArticleParser,
+        ParseResult as ParserParseResult,
+        ParserConfig, ParserFactory, ParserRegistry,
+        ZhihuParser, XiaohongshuParser, BilibiliParser, YoutubeParser,
+        WeixinParser, GithubParser, GenericParser,
+    )
+except ImportError:
+    pass
+
+try:
+    from .transcriber import (
+        BaseTranscriber, TranscriptionResult as TranscriberResult,
+        FunASRTranscriber, WhisperTranscriber,
+        YtdlpExtractor, extract_video_info,
+        OnlineVideoFetcher, fetch_video_online,
+    )
+except ImportError:
+    pass
+
+try:
+    from .storage import (
+        ResultCache, CacheEntry, ResultStorage,
+        SourceDocumentManager, StateManager, ProcessStatus, ResourceState,
+    )
+except ImportError:
+    pass
+
+try:
+    from .batch_transcriber import (
+        BatchTranscriber, BatchTranscribeConfig, BatchResult, FileResult,
+        MediaScanner, MediaFileInfo, ScanResult,
+        SegmentHandler, SegmentationConfig,
+        TranscriptionWriter, WriterConfig,
+    )
+except ImportError:
+    pass
+
+try:
+    from .dependency_installer import (
+        ensure_dependency, ensure_all_dependencies,
+        ensure_transcribe_dependencies, ensure_core_dependencies,
+        ensure_comprehension_dependencies,
+        is_package_installed, is_ffmpeg_installed,
+    )
+except ImportError:
+    pass
 
 __all__ = [
     'parse',

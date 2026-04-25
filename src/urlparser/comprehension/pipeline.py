@@ -18,63 +18,7 @@ from .vlm_engine import BaseVLMEngine, OpenVINOEngine, LlamaCppEngine
 
 # Import result types from parent to avoid circular imports
 from ..models import VisualFrameResult, ComprehensionResult
-
-
-def _find_ffmpeg() -> str:
-    """查找 ffmpeg 可执行文件路径"""
-    # Try PATH first
-    try:
-        result = subprocess.run(
-            ['ffmpeg', '-version'], capture_output=True, timeout=5
-        )
-        if result.returncode == 0:
-            return 'ffmpeg'
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Try imageio-ffmpeg bundled ffmpeg
-    try:
-        import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except (ImportError, Exception):
-        pass
-
-    # Try Windows common location
-    if os.name == 'nt':
-        for p in [r'C:\ffmpeg\bin\ffmpeg.exe']:
-            if os.path.exists(p):
-                return p
-
-    return 'ffmpeg'  # fallback, will fail gracefully
-
-
-def _find_ffprobe() -> str:
-    """查找 ffprobe 可执行文件路径"""
-    try:
-        result = subprocess.run(
-            ['ffprobe', '-version'], capture_output=True, timeout=5
-        )
-        if result.returncode == 0:
-            return 'ffprobe'
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # imageio-ffmpeg doesn't include ffprobe, check alongside ffmpeg
-    ffmpeg_path = _find_ffmpeg()
-    if os.path.isabs(ffmpeg_path):
-        ffprobe_path = os.path.join(
-            os.path.dirname(ffmpeg_path),
-            os.path.basename(ffmpeg_path).replace('ffmpeg', 'ffprobe')
-        )
-        if os.path.exists(ffprobe_path):
-            return ffprobe_path
-
-    if os.name == 'nt':
-        p = r'C:\ffmpeg\bin\ffprobe.exe'
-        if os.path.exists(p):
-            return p
-
-    return 'ffprobe'
+from ..utils.ffmpeg_utils import find_ffmpeg, find_ffprobe
 
 
 class ComprehensionPipeline:
@@ -121,7 +65,7 @@ class ComprehensionPipeline:
         self._frame_dir = os.path.join(self._temp_dir, "frames")
 
         # 查找 ffmpeg
-        ffmpeg_path = _find_ffmpeg()
+        ffmpeg_path = find_ffmpeg()
 
         try:
             # 1. 下载视频

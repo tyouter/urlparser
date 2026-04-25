@@ -1,30 +1,18 @@
 """
-数据模型定义
+Parser 内部数据模型
 
-定义解析器的输入输出数据结构
+注意: ParseResult 和 ContentType 在此模块中是 parser 子系统内部使用的简化版本。
+规范定义在 urlparser.models 中，通过 create_result_from_parser() 转换。
+长期计划：将 parser 层迁移到直接使用 urlparser.models.ParseResult。
 """
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
-from enum import Enum
 
+from ..models import PlatformType, ContentType
 
-class PlatformType(Enum):
-    ZHIHU = "zhihu"
-    XIAOHONGSHU = "xiaohongshu"
-    BILIBILI = "bilibili"
-    YOUTUBE = "youtube"
-    WEIXIN = "weixin"
-    GITHUB = "github"
-    DRIBBBLE = "dribbble"
-    GENERIC = "default"
-
-
-class ContentType(Enum):
-    ARTICLE = "articles"
-    VIDEO = "videos"
-    WEBPAGE = "webpages"
-    IDEA = "ideas"
+# Alias for cross-reference
+from ..models import ParseResult as CanonicalParseResult
 
 
 @dataclass

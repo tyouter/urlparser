@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
 import subprocess
 import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+from ..utils.ffmpeg_utils import find_ffmpeg
 
 
 def convert_audio_for_funasr(input_path: str, output_path: str,
@@ -28,9 +33,7 @@ def convert_audio_for_funasr(input_path: str, output_path: str,
     from pathlib import Path
 
     try:
-        ffmpeg_cmd = 'ffmpeg'
-        if os.name == 'nt' and os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-            ffmpeg_cmd = 'C:/ffmpeg/bin/ffmpeg.exe'
+        ffmpeg_cmd = find_ffmpeg()
 
         cmd = [ffmpeg_cmd]
 
@@ -61,11 +64,11 @@ def convert_audio_for_funasr(input_path: str, output_path: str,
                 if file_size > 0:
                     return True
         else:
-            print(f"FFmpeg stderr: {result.stderr[:500] if result.stderr else 'None'}")
+            logger.warning("FFmpeg stderr: %s", result.stderr[:500] if result.stderr else 'None')
 
         return False
     except Exception as e:
-        print(f"Audio conversion failed: {e}")
+        logger.error("Audio conversion failed: %s", e)
         return False
 
 
@@ -121,8 +124,9 @@ class BaseTranscriber(ABC):
                 'extract_flat': False,
             }
 
-            if os.name == 'nt' and os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-                ydl_opts['ffmpeg_location'] = 'C:/ffmpeg/bin/ffmpeg.exe'
+            ffmpeg_path = find_ffmpeg()
+            if os.path.isabs(ffmpeg_path):
+                ydl_opts['ffmpeg_location'] = ffmpeg_path
 
             if use_audio_only:
                 # Download best audio, keep original format first
@@ -155,14 +159,14 @@ class BaseTranscriber(ABC):
             # For FunASR, convert to 16kHz mono WAV to avoid memory bugs
             if self.engine_name == "funasr":
                 converted_file = os.path.join(temp_dir, 'audio_converted.wav')
-                print(f"Converting audio for FunASR: {audio_file} -> {converted_file}")
+                logger.info("Converting audio for FunASR: %s -> %s", audio_file, converted_file)
                 if convert_audio_for_funasr(audio_file, converted_file):
                     from pathlib import Path
                     file_size = Path(converted_file).stat().st_size
-                    print(f"Conversion successful, output size: {file_size} bytes")
+                    logger.info("Conversion successful, output size: %d bytes", file_size)
                     audio_file = converted_file
                 else:
-                    print(f"Conversion failed, using original file")
+                    logger.warning("Conversion failed, using original file")
                     # Fallback: try original file
                     pass
 
@@ -205,9 +209,7 @@ class BaseTranscriber(ABC):
                 # For other engines, extract audio if requested
                 temp_audio_file = tempfile.mktemp(suffix='.mp3', prefix='audio_')
 
-                ffmpeg_cmd = 'ffmpeg'
-                if os.name == 'nt' and os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-                    ffmpeg_cmd = 'C:/ffmpeg/bin/ffmpeg.exe'
+                ffmpeg_cmd = find_ffmpeg()
 
                 cmd = [
                     ffmpeg_cmd,

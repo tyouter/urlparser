@@ -6,10 +6,13 @@
 
 import json
 import hashlib
+import logging
 import time
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Union
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -166,7 +169,7 @@ class ResultCache:
                 encoding='utf-8'
             )
         except Exception as e:
-            print(f"[WARN] Cache save failed: {e}")
+            logger.warning("Cache save failed: %s", e)
 
     async def _load_from_disk(self, key: str) -> Optional[CacheEntry]:
         try:

@@ -8,49 +8,7 @@ import os
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
-
-def _find_ffmpeg() -> str:
-    """查找 ffmpeg"""
-    try:
-        result = subprocess.run(
-            ['ffmpeg', '-version'], capture_output=True, timeout=5
-        )
-        if result.returncode == 0:
-            return 'ffmpeg'
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    try:
-        import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except (ImportError, Exception):
-        pass
-    if os.name == 'nt':
-        p = r'C:\ffmpeg\bin\ffmpeg.exe'
-        if os.path.exists(p):
-            return p
-    return 'ffmpeg'
-
-
-def _find_ffprobe() -> str:
-    """查找 ffprobe"""
-    try:
-        result = subprocess.run(
-            ['ffprobe', '-version'], capture_output=True, timeout=5
-        )
-        if result.returncode == 0:
-            return 'ffprobe'
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-    ffmpeg_path = _find_ffmpeg()
-    if os.path.isabs(ffmpeg_path):
-        p = os.path.join(os.path.dirname(ffmpeg_path), 'ffprobe' + os.path.splitext(os.path.basename(ffmpeg_path))[1])
-        if os.path.exists(p):
-            return p
-    if os.name == 'nt':
-        p = r'C:\ffmpeg\bin\ffprobe.exe'
-        if os.path.exists(p):
-            return p
-    return 'ffprobe'
+from ..utils.ffmpeg_utils import find_ffmpeg, find_ffprobe
 
 
 class FrameExtractor:
@@ -80,7 +38,7 @@ class FrameExtractor:
             场景时间列表 [(start_seconds, end_seconds), ...]
         """
         cmd = [
-            ffmpeg_path or _find_ffmpeg(), '-i', video_path,
+            ffmpeg_path or find_ffmpeg(), '-i', video_path,
             '-vf', f"scdet=threshold={threshold}",
             '-f', 'null', '-'
         ]
@@ -174,7 +132,7 @@ class FrameExtractor:
     ) -> bool:
         """提取单个帧"""
         cmd = [
-            ffmpeg_path or _find_ffmpeg(), '-ss', str(timestamp),
+            ffmpeg_path or find_ffmpeg(), '-ss', str(timestamp),
             '-i', video_path,
             '-frames:v', '1',
             '-q:v', '2',
@@ -191,7 +149,7 @@ class FrameExtractor:
     def _get_duration(video_path: str, ffprobe_path: Optional[str] = None) -> float:
         """获取视频时长（秒）"""
         cmd = [
-            ffprobe_path or _find_ffprobe(), '-v', 'error',
+            ffprobe_path or find_ffprobe(), '-v', 'error',
             '-show_entries', 'format=duration',
             '-of', 'default=noprint_wrappers=1:nokey=1',
             video_path

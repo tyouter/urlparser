@@ -39,24 +39,32 @@ def hash_url(url: str) -> str:
 
 
 def detect_platform(url: str) -> str:
+    """Detect platform from URL.
+
+    Tries ParserRegistry first (handles registered parsers),
+    falls back to domain-based matching for platforms without parsers.
+    """
+    # Try ParserRegistry first (covers registered platforms)
+    try:
+        from ..parser.factory import ParserRegistry
+        platform = ParserRegistry.detect_platform(url)
+        if platform != 'generic':
+            return platform
+    except Exception:
+        pass
+
+    # Fallback: domain-based matching (covers platforms without dedicated parsers)
     domain = urlparse(url).netloc.lower()
 
     platform_map = {
-        'zhihu.com': 'zhihu',
-        'bilibili.com': 'bilibili',
         'b23.tv': 'bilibili',
-        'youtube.com': 'youtube',
         'youtu.be': 'youtube',
-        'weixin.qq.com': 'weixin',
-        'mp.weixin.qq.com': 'weixin',
-        'xiaohongshu.com': 'xiaohongshu',
         'xhslink.com': 'xiaohongshu',
-        'github.com': 'github',
-        'dribbble.com': 'dribbble',
         'douyin.com': 'douyin',
         'vimeo.com': 'vimeo',
         'dailymotion.com': 'dailymotion',
         'twitch.tv': 'twitch',
+        'dribbble.com': 'dribbble',
     }
 
     for platform_domain, platform_name in platform_map.items():

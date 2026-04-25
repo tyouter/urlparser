@@ -89,9 +89,10 @@ class BbBrowserFetcher(BaseFetcher):
         self._bb_available = shutil.which('bb-browser') is not None
         return self._bb_available
 
-    async def _run_command(self, cmd_str: str) -> Tuple[str, str, int]:
-        proc = await asyncio.create_subprocess_shell(
-            cmd_str,
+    async def _run_exec(self, cmd: List[str]) -> Tuple[str, str, int]:
+        """Run command using exec (no shell injection risk)."""
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -101,9 +102,8 @@ class BbBrowserFetcher(BaseFetcher):
         return out, err, proc.returncode or 0
 
     async def _run_bb_browser(self, adapter: str, args: List[str]) -> Dict[str, Any]:
-        cmd_parts = ['bb-browser', 'site', adapter] + args + ['--json']
-        cmd_str = ' '.join(f'"{a}"' if ' ' in a else a for a in cmd_parts)
-        out, err, code = await self._run_command(cmd_str)
+        cmd = ['bb-browser', 'site', adapter] + args + ['--json']
+        out, err, code = await self._run_exec(cmd)
 
         if code != 0:
             raise RuntimeError(f"bb-browser exited {code}: {err}")
@@ -123,8 +123,8 @@ class BbBrowserFetcher(BaseFetcher):
         Returns:
             JSON 响应数据
         """
-        cmd_str = f'bb-browser fetch "{url}" --json'
-        out, err, code = await self._run_command(cmd_str)
+        cmd = ['bb-browser', 'fetch', url, '--json']
+        out, err, code = await self._run_exec(cmd)
 
         if code != 0:
             raise RuntimeError(f"bb-browser fetch failed ({code}): {err}")
@@ -144,9 +144,8 @@ class BbBrowserFetcher(BaseFetcher):
         Returns:
             执行结果
         """
-        escaped = js_expr.replace('"', '\\"')
-        cmd_str = f'bb-browser eval "{escaped}" --json'
-        out, err, code = await self._run_command(cmd_str)
+        cmd = ['bb-browser', 'eval', js_expr, '--json']
+        out, err, code = await self._run_exec(cmd)
 
         if code != 0:
             raise RuntimeError(f"bb-browser eval failed ({code}): {err}")
@@ -169,8 +168,8 @@ class BbBrowserFetcher(BaseFetcher):
         Returns:
             (title, content) 元组
         """
-        cmd_str = f'bb-browser open "{url}"'
-        out, err, code = await self._run_command(cmd_str)
+        cmd = ['bb-browser', 'open', url]
+        out, err, code = await self._run_exec(cmd)
 
         if code != 0:
             raise RuntimeError(f"bb-browser open failed ({code}): {err}")

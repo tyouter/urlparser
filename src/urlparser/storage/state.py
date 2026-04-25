@@ -6,12 +6,13 @@
 
 import json
 import hashlib
-import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
+
+from ..utils.url_utils import URLNormalizer
 
 
 class ProcessStatus(Enum):
@@ -45,20 +46,6 @@ class ResourceState:
     file_content_length: Optional[int]
     duplicate_urls: List[str]
     duplicate_files: List[str]
-
-
-class URLNormalizer:
-    def normalize(self, url: str) -> str:
-        url = re.sub(
-            r'[?&](buvid|timestamp|unique_k|up_id|mid|is_story_h5|plat_id|'
-            r'spmid|share_session_id|fsource|from_spmid|bvid|utm_|'
-            r'ref_|share_|from_|spm_|vd_source)[^&]*',
-            '',
-            url
-        )
-        url = url.split('#')[0]
-        url = url.rstrip('?')
-        return url.strip()
 
 
 class StateManager:

@@ -8,10 +8,13 @@ import subprocess
 import os
 import sys
 import importlib
+import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional, Tuple
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class DependencyType(Enum):
@@ -141,15 +144,10 @@ def is_ffmpeg_installed() -> Tuple[bool, Optional[str]]:
         (是否已安装, 版本号)
     """
     try:
-        ffmpeg_cmd = 'ffmpeg'
-        ffprobe_cmd = 'ffprobe'
+        from .utils.ffmpeg_utils import find_ffmpeg, find_ffprobe
 
-        # Windows 下检查 C:/ffmpeg/bin
-        if os.name == 'nt':
-            if os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-                ffmpeg_cmd = 'C:/ffmpeg/bin/ffmpeg.exe'
-            if os.path.exists('C:/ffmpeg/bin/ffprobe.exe'):
-                ffprobe_cmd = 'C:/ffmpeg/bin/ffprobe.exe'
+        ffmpeg_cmd = find_ffmpeg()
+        ffprobe_cmd = find_ffprobe()
 
         # 检查 ffmpeg
         result = subprocess.run(
@@ -200,7 +198,7 @@ def install_pip_package(package_name: str, extra_packages: Optional[List[str]] =
     if extra_packages:
         packages.extend(extra_packages)
 
-    print(f"正在安装: {', '.join(packages)}")
+    logger.info("正在安装: %s", ', '.join(packages))
 
     try:
         result = subprocess.run(
@@ -210,16 +208,16 @@ def install_pip_package(package_name: str, extra_packages: Optional[List[str]] =
             timeout=300  # 5分钟超时
         )
         if result.returncode == 0:
-            print(f"安装成功: {package_name}")
+            logger.info("安装成功: %s", package_name)
             return True
         else:
-            print(f"安装失败: {result.stderr}")
+            logger.error("安装失败: %s", result.stderr)
             return False
     except subprocess.TimeoutExpired:
-        print(f"安装超时: {package_name}")
+        logger.error("安装超时: %s", package_name)
         return False
     except Exception as e:
-        print(f"安装异常: {e}")
+        logger.error("安装异常: %s", e)
         return False
 
 
@@ -233,7 +231,7 @@ def run_post_install_command(command: str) -> bool:
     Returns:
         是否成功
     """
-    print(f"正在执行: {command}")
+    logger.info("正在执行: %s", command)
     try:
         parts = command.split()
         result = subprocess.run(
@@ -243,13 +241,13 @@ def run_post_install_command(command: str) -> bool:
             timeout=120
         )
         if result.returncode == 0:
-            print(f"执行成功: {command}")
+            logger.info("执行成功: %s", command)
             return True
         else:
-            print(f"执行失败: {result.stderr}")
+            logger.error("执行失败: %s", result.stderr)
             return False
     except Exception as e:
-        print(f"执行异常: {e}")
+        logger.error("执行异常: %s", e)
         return False
 
 
@@ -275,7 +273,7 @@ def install_ffmpeg_imageio() -> bool:
         import imageio_ffmpeg
         ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
-        print(f"ffmpeg 已通过 imageio-ffmpeg 安装: {ffmpeg_path}")
+        logger.info("ffmpeg 已通过 imageio-ffmpeg 安装: %s", ffmpeg_path)
 
         # 在 Windows 下，复制到 C:/ffmpeg/bin 以便项目使用
         if os.name == 'nt':
@@ -291,12 +289,12 @@ def install_ffmpeg_imageio() -> bool:
             shutil.copy2(ffmpeg_path, target_ffmpeg)
 
             # imageio-ffmpeg 不包含 ffprobe，需要单独下载
-            print(f"ffmpeg 已复制到: {target_ffmpeg}")
-            print("注意: imageio-ffmpeg 不包含 ffprobe，部分功能可能受限")
+            logger.info("ffmpeg 已复制到: %s", target_ffmpeg)
+            logger.warning("注意: imageio-ffmpeg 不包含 ffprobe，部分功能可能受限")
 
         return True
     except Exception as e:
-        print(f"imageio-ffmpeg 安装失败: {e}")
+        logger.error("imageio-ffmpeg 安装失败: %s", e)
         return False
 
 
@@ -327,15 +325,15 @@ def ensure_dependency(name: str, auto_install: bool = True) -> Tuple[bool, Optio
         installed, version = False, None
 
     if installed:
-        print(f"[OK] {name} 已安装 (v{version or '未知'})")
+        logger.info("[OK] %s 已安装 (v%s)", name, version or '未知')
         return True, version
 
     # 未安装
     if not auto_install:
-        print(f"[MISSING] {name} 未安装")
+        logger.warning("[MISSING] %s 未安装", name)
         return False, None
 
-    print(f"[INSTALL] {name} 未安装，正在安装...")
+    logger.info("[INSTALL] %s 未安装，正在安装...", name)
 
     # 安装
     if dep.type == DependencyType.PYTHON_PACKAGE:
@@ -361,7 +359,7 @@ def ensure_dependency(name: str, auto_install: bool = True) -> Tuple[bool, Optio
 
     elif dep.type == DependencyType.EXTERNAL_TOOL and name == "ffmpeg":
         # ffmpeg 需要特殊处理
-        print("ffmpeg 是外部工具，正在尝试通过 imageio-ffmpeg 安装...")
+        logger.info("ffmpeg 是外部工具，正在尝试通过 imageio-ffmpeg 安装...")
         success = install_ffmpeg_imageio()
         if success:
             return True, "imageio-ffmpeg"
@@ -424,7 +422,7 @@ def ensure_transcribe_dependencies(auto_install: bool = True) -> bool:
     Returns:
         是否所有必要依赖都已安装
     """
-    print("\n检查转录依赖...")
+    logger.info("\n检查转录依赖...")
 
     # 检查 ffmpeg
     ffmpeg_ok, _ = ensure_dependency("ffmpeg", auto_install)
@@ -439,14 +437,14 @@ def ensure_transcribe_dependencies(auto_install: bool = True) -> bool:
     engine_ok = funasr_ok or whisper_ok
 
     if ffmpeg_ok and engine_ok:
-        print("\n转录依赖检查完成，功能可用")
+        logger.info("转录依赖检查完成，功能可用")
         return True
     else:
-        print("\n转录依赖检查完成，部分依赖缺失")
+        logger.warning("转录依赖检查完成，部分依赖缺失")
         if not ffmpeg_ok:
-            print("  - ffmpeg 缺失，无法处理音视频")
+            logger.warning("  - ffmpeg 缺失，无法处理音视频")
         if not engine_ok:
-            print("  - 转录引擎缺失，需要安装 funasr 或 faster-whisper")
+            logger.warning("  - 转录引擎缺失，需要安装 funasr 或 faster-whisper")
         return False
 
 
@@ -460,16 +458,16 @@ def ensure_core_dependencies(auto_install: bool = True) -> bool:
     Returns:
         是否所有核心依赖都已安装
     """
-    print("\n检查核心依赖...")
+    logger.info("\n检查核心依赖...")
 
     results = ensure_all_dependencies(categories=['core'], auto_install=auto_install)
 
     all_ok = all(r['installed'] for r in results.values())
 
     if all_ok:
-        print("\n核心依赖检查完成")
+        logger.info("核心依赖检查完成")
     else:
-        print("\n核心依赖检查完成，部分依赖缺失")
+        logger.warning("核心依赖检查完成，部分依赖缺失")
 
     return all_ok
 
@@ -484,7 +482,7 @@ def ensure_comprehension_dependencies(auto_install: bool = True) -> bool:
     Returns:
         是否所有必要依赖都已安装
     """
-    print("\n检查视频理解依赖...")
+    logger.info("\n检查视频理解依赖...")
 
     deps = ["psutil", "PIL", "openvino", "openvino_genai", "llama_cpp"]
     results = {}
@@ -499,15 +497,15 @@ def ensure_comprehension_dependencies(auto_install: bool = True) -> bool:
     all_ok = results.get("psutil", False) and results.get("PIL", False) and has_engine
 
     if all_ok:
-        print("\n视频理解依赖检查完成，功能可用")
+        logger.info("视频理解依赖检查完成，功能可用")
     else:
-        print("\n视频理解依赖检查完成，部分依赖缺失")
+        logger.warning("视频理解依赖检查完成，部分依赖缺失")
         if not results.get("psutil", False):
-            print("  - psutil 缺失")
+            logger.warning("  - psutil 缺失")
         if not results.get("PIL", False):
-            print("  - Pillow 缺失")
+            logger.warning("  - Pillow 缺失")
         if not has_engine:
-            print("  - 推理引擎缺失 (openvino 或 llama-cpp-python)")
+            logger.warning("  - 推理引擎缺失 (openvino 或 llama-cpp-python)")
 
     return all_ok
 

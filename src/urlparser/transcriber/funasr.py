@@ -9,6 +9,7 @@ FunASR 转录器
 
 import os
 import gc
+import logging
 import re
 import tempfile
 import shutil
@@ -16,6 +17,8 @@ from typing import Optional, Dict, List
 from pathlib import Path
 
 from .base import BaseTranscriber, TranscriptionResult, convert_audio_for_funasr
+
+logger = logging.getLogger(__name__)
 
 
 MAX_DIRECT_DURATION = 240.0
@@ -56,7 +59,7 @@ class FunASRTranscriber(BaseTranscriber):
 
             model_name = model_map.get(self.model_size, model_map['large'])
 
-            print(f"Loading FunASR model: {model_name}")
+            logger.info("Loading FunASR model: %s", model_name)
 
             self._model = AutoModel(
                 model=model_name,
@@ -173,7 +176,7 @@ class FunASRTranscriber(BaseTranscriber):
 
         num_segments = int(duration / SEGMENT_DURATION) + (1 if duration % SEGMENT_DURATION > 0 else 0)
 
-        print(f"Segmented mode: {duration:.0f}s audio, {num_segments} segments of {SEGMENT_DURATION:.0f}s each")
+        logger.info("Segmented mode: %.0fs audio, %d segments of %.0fs each", duration, num_segments, SEGMENT_DURATION)
 
         all_text = []
         all_segments = []
@@ -199,11 +202,11 @@ class FunASRTranscriber(BaseTranscriber):
                             pass
 
                 if not os.path.exists(seg_wav) or Path(seg_wav).stat().st_size < 1000:
-                    print(f"  Seg {i+1}/{num_segments} [{start:.0f}s-{end:.0f}s]: extraction failed, skip")
+                    logger.warning("Seg %d/%d [%.0fs-%.0fs]: extraction failed, skip", i+1, num_segments, start, end)
                     continue
 
                 seg_size_mb = Path(seg_wav).stat().st_size / (1024 * 1024)
-                print(f"  Seg {i+1}/{num_segments} [{start:.0f}s-{end:.0f}s] ({seg_size_mb:.1f}MB): transcribing...")
+                logger.info("Seg %d/%d [%.0fs-%.0fs] (%.1fMB): transcribing...", i+1, num_segments, start, end, seg_size_mb)
 
                 result = self._do_transcribe(seg_wav, language)
 
@@ -216,11 +219,11 @@ class FunASRTranscriber(BaseTranscriber):
                             'text': seg.get('text', ''),
                         })
                     preview = result.text[:50].replace('\n', ' ')
-                    print(f"  Seg {i+1}/{num_segments}: OK -> {preview}...")
+                    logger.debug("Seg %d/%d: OK -> %s...", i+1, num_segments, preview)
                 elif result.success:
-                    print(f"  Seg {i+1}/{num_segments}: OK (no speech)")
+                    logger.debug("Seg %d/%d: OK (no speech)", i+1, num_segments)
                 else:
-                    print(f"  Seg {i+1}/{num_segments}: FAIL - {result.error}")
+                    logger.warning("Seg %d/%d: FAIL - %s", i+1, num_segments, result.error)
 
                 try:
                     os.unlink(seg_wav)

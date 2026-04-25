@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+from .ffmpeg_utils import find_ffmpeg, find_ffprobe
+
 
 # 音频文件扩展名
 AUDIO_EXTENSIONS = {
@@ -59,13 +61,7 @@ def get_media_duration(path: str) -> float:
         return 0.0
 
     try:
-        # 查找 ffprobe
-        ffprobe_cmd = 'ffprobe'
-
-        # Windows 下检查 C:/ffmpeg/bin
-        if os.name == 'nt':
-            if os.path.exists('C:/ffmpeg/bin/ffprobe.exe'):
-                ffprobe_cmd = 'C:/ffmpeg/bin/ffprobe.exe'
+        ffprobe_cmd = find_ffprobe()
 
         cmd = [
             ffprobe_cmd,
@@ -202,12 +198,7 @@ def extract_audio_segment(video_path: str, start: float, end: float,
         是否成功
     """
     try:
-        ffmpeg_cmd = 'ffmpeg'
-
-        # Windows 下检查 C:/ffmpeg/bin
-        if os.name == 'nt':
-            if os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-                ffmpeg_cmd = 'C:/ffmpeg/bin/ffmpeg.exe'
+        ffmpeg_cmd = find_ffmpeg()
 
         cmd = [
             ffmpeg_cmd,
@@ -239,14 +230,8 @@ def extract_audio_segment(video_path: str, start: float, end: float,
 def check_ffmpeg_available() -> bool:
     """检查 ffmpeg/ffprobe 是否可用"""
     try:
-        ffmpeg_cmd = 'ffmpeg'
-        ffprobe_cmd = 'ffprobe'
-
-        if os.name == 'nt':
-            if os.path.exists('C:/ffmpeg/bin/ffmpeg.exe'):
-                ffmpeg_cmd = 'C:/ffmpeg/bin/ffmpeg.exe'
-            if os.path.exists('C:/ffmpeg/bin/ffprobe.exe'):
-                ffprobe_cmd = 'C:/ffmpeg/bin/ffprobe.exe'
+        ffmpeg_cmd = find_ffmpeg()
+        ffprobe_cmd = find_ffprobe()
 
         # 检查 ffmpeg
         result = subprocess.run(

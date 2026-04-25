@@ -15,7 +15,7 @@ pip install urlparser
 ### 本地开发安装
 
 ```bash
-pip install -e C:\projects\urlparser-lib
+pip install -e .
 ```
 
 ### 依赖安装

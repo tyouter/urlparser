@@ -44,7 +44,7 @@ class ParserRegistry:
             if parser_cls.can_handle(url):
                 return platform
 
-        return 'default'
+        return 'generic'
 
     @classmethod
     def list_supported_platforms(cls) -> List[str]:

@@ -56,7 +56,11 @@ class FetchResult:
 
 @dataclass
 class FetchConfig:
-    """读取配置"""
+    """读取配置
+
+    Note: locale and timezone_id default to China-oriented values.
+    Users targeting other regions should override these fields.
+    """
     timeout: int = 30000
     headless: bool = True
     stealth_mode: bool = True
