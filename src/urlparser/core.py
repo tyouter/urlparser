@@ -14,9 +14,11 @@ from typing import Optional, List, Dict, Any
 from .config import ParseConfig
 from .models import (
     ParseResult, PlatformType, ContentType,
-    VideoMetadata, TranscriptionResult, create_result_from_parser,
+    VideoMetadata, TranscriptionResult, RetryAttempt,
+    create_result_from_parser,
 )
 from .parser import ParserFactory
+from .parser.mixins.anti_scraping import AntiScrapingMixin
 from .transcriber import FunASRTranscriber, WhisperTranscriber
 from .utils import detect_platform, is_video_url
 from .comprehension import ComprehensionPipeline
@@ -94,7 +96,10 @@ class UrlParser:
         start_time = time.time()
 
         try:
-            result = await self._do_parse(url, cfg)
+            if cfg.retry.enabled:
+                result = await self._parse_with_retry(url, cfg)
+            else:
+                result = await self._do_parse(url, cfg)
             result.parse_time = round(time.time() - start_time, 2)
 
             # Write to cache on success
@@ -114,6 +119,268 @@ class UrlParser:
                 error=str(e),
                 parse_time=round(time.time() - start_time, 2),
             )
+
+    async def _parse_with_retry(self, url: str, config: ParseConfig) -> ParseResult:
+        """带反爬绕过重试的解析流程"""
+        platform = detect_platform(url)
+        is_vid = is_video_url(url)
+        content_type = ContentType.VIDEO if is_vid else ContentType.ARTICLE
+        platform_type = self._detect_platform_type(platform)
+
+        retry_attempts: List[RetryAttempt] = []
+        start_total = time.time()
+
+        # --- Attempt 1: standard Playwright parser ---
+        attempt_start = time.time()
+        try:
+            result = await self._do_parse(url, config)
+            elapsed = round(time.time() - attempt_start, 2)
+
+            if result.fetch_success:
+                blocked = AntiScrapingMixin.detect_blocked(
+                    platform, result.title, result.content
+                )
+                quality_ok, q_reason = AntiScrapingMixin.validate_quality(
+                    result.title, result.content,
+                    min_length=config.retry.min_quality_length,
+                )
+
+                if not blocked and quality_ok:
+                    result.final_strategy = "playwright"
+                    result.retry_attempts = retry_attempts
+                    return result
+
+                reason = blocked or q_reason
+                retry_attempts.append(RetryAttempt(
+                    strategy="playwright",
+                    success=False,
+                    blocked_reason=reason,
+                    duration=elapsed,
+                ))
+            else:
+                retry_attempts.append(RetryAttempt(
+                    strategy="playwright",
+                    success=False,
+                    error=result.error or "fetch failed",
+                    duration=elapsed,
+                ))
+        except Exception as e:
+            elapsed = round(time.time() - attempt_start, 2)
+            retry_attempts.append(RetryAttempt(
+                strategy="playwright",
+                success=False,
+                error=str(e),
+                duration=elapsed,
+            ))
+            result = ParseResult(
+                url=url, platform=platform,
+                platform_type=platform_type, content_type=content_type,
+                fetch_success=False, error=str(e),
+            )
+
+        # --- Retry loop with fallback strategies ---
+        strategies = [
+            ("playwright_extended", self._strategy_playwright_extended),
+            ("bb_browser", self._strategy_bb_browser),
+            ("cookie_fetcher", self._strategy_cookie_fetcher),
+            ("user_chrome", self._strategy_user_chrome),
+        ]
+
+        for strategy_name, strategy_fn in strategies:
+            # Check total timeout
+            if time.time() - start_total > config.retry.total_timeout:
+                break
+            if len(retry_attempts) > config.retry.max_attempts:
+                break
+
+            attempt_start = time.time()
+            try:
+                fetch_result = await asyncio.wait_for(
+                    strategy_fn(url, config),
+                    timeout=config.retry.timeout_per_attempt,
+                )
+                elapsed = round(time.time() - attempt_start, 2)
+
+                if not fetch_result or not fetch_result.success:
+                    retry_attempts.append(RetryAttempt(
+                        strategy=strategy_name,
+                        success=False,
+                        error=fetch_result.error if fetch_result else "no result",
+                        duration=elapsed,
+                    ))
+                    continue
+
+                # Convert FetchResult to ParseResult
+                candidate = self._fetch_result_to_parse_result(
+                    fetch_result, url, platform, platform_type, content_type
+                )
+
+                # Check blocked + quality
+                blocked = AntiScrapingMixin.detect_blocked(
+                    platform, candidate.title, candidate.content
+                )
+                quality_ok, q_reason = AntiScrapingMixin.validate_quality(
+                    candidate.title, candidate.content,
+                    min_length=config.retry.min_quality_length,
+                )
+
+                if not blocked and quality_ok:
+                    candidate.final_strategy = strategy_name
+                    candidate.retry_attempts = retry_attempts
+
+                    # Run transcription/comprehension if video
+                    if is_vid and config.transcribe.enabled and candidate.fetch_success:
+                        candidate.transcription = await self._transcribe_audio(url, config.transcribe)
+                    if is_vid and config.comprehension.enabled and candidate.fetch_success:
+                        candidate.comprehension = await self._run_comprehension(
+                            url, config.comprehension, candidate.transcription
+                        )
+
+                    retry_attempts.append(RetryAttempt(
+                        strategy=strategy_name,
+                        success=True,
+                        duration=elapsed,
+                    ))
+                    candidate.retry_attempts = retry_attempts
+                    return candidate
+                else:
+                    reason = blocked or q_reason
+                    retry_attempts.append(RetryAttempt(
+                        strategy=strategy_name,
+                        success=False,
+                        blocked_reason=reason,
+                        duration=elapsed,
+                    ))
+
+            except asyncio.TimeoutError:
+                elapsed = round(time.time() - attempt_start, 2)
+                retry_attempts.append(RetryAttempt(
+                    strategy=strategy_name,
+                    success=False,
+                    error="timeout",
+                    duration=elapsed,
+                ))
+            except Exception as e:
+                elapsed = round(time.time() - attempt_start, 2)
+                retry_attempts.append(RetryAttempt(
+                    strategy=strategy_name,
+                    success=False,
+                    error=str(e),
+                    duration=elapsed,
+                ))
+
+        # All retries exhausted - return best result with attempts log
+        result.retry_attempts = retry_attempts
+        if not result.final_strategy:
+            result.final_strategy = "exhausted"
+        return result
+
+    async def _strategy_playwright_extended(self, url: str, config: ParseConfig):
+        """Extended Playwright with more scrolling and longer wait."""
+        from .fetcher import PlaywrightFetcher, FetchConfig
+        fc = FetchConfig(
+            timeout=60000,
+            headless=config.browser.headless,
+            stealth_mode=config.browser.stealth_mode,
+            scroll_enabled=True,
+            max_scrolls=40,
+            scroll_delay=2.0,
+            expand_full_text=True,
+            close_login_popup=True,
+        )
+        async with PlaywrightFetcher(fc) as fetcher:
+            return await fetcher.fetch(url)
+
+    async def _strategy_bb_browser(self, url: str, config: ParseConfig):
+        """CDP-controlled user Chrome via bb-browser."""
+        try:
+            from .fetcher import BbBrowserFetcher
+        except ImportError:
+            return None
+        async with BbBrowserFetcher() as fetcher:
+            return await fetcher.fetch(url)
+
+    async def _strategy_cookie_fetcher(self, url: str, config: ParseConfig):
+        """Playwright with cookies."""
+        if not config.browser.cookies_file:
+            return None
+        try:
+            from .fetcher import CookieFetcher, FetchConfig
+        except ImportError:
+            return None
+        fc = FetchConfig(
+            cookies_file=config.browser.cookies_file,
+            headless=config.browser.headless,
+            stealth_mode=config.browser.stealth_mode,
+            scroll_enabled=config.scroll.enabled,
+            max_scrolls=config.scroll.max_scrolls,
+            scroll_delay=config.scroll.scroll_delay,
+            expand_full_text=config.expand_full_text,
+            close_login_popup=config.close_login_popup,
+        )
+        async with CookieFetcher(fc) as fetcher:
+            return await fetcher.fetch(url)
+
+    async def _strategy_user_chrome(self, url: str, config: ParseConfig):
+        """User Chrome profile."""
+        try:
+            from .fetcher import UserChromeFetcher, FetchConfig
+        except ImportError:
+            return None
+        fc = FetchConfig(
+            user_data_dir=config.browser.user_data_dir,
+            headless=False,
+            scroll_enabled=config.scroll.enabled,
+            max_scrolls=config.scroll.max_scrolls,
+            scroll_delay=config.scroll.scroll_delay,
+            expand_full_text=config.expand_full_text,
+            close_login_popup=config.close_login_popup,
+        )
+        async with UserChromeFetcher(fc) as fetcher:
+            return await fetcher.fetch(url)
+
+    @staticmethod
+    def _fetch_result_to_parse_result(
+        fr, url: str, platform: str,
+        platform_type: PlatformType, content_type: ContentType
+    ) -> ParseResult:
+        """Convert Fetcher's FetchResult to canonical ParseResult."""
+        from .fetcher import FetchResult
+        if not isinstance(fr, FetchResult):
+            return ParseResult(
+                url=url, platform=platform,
+                platform_type=platform_type, content_type=content_type,
+                fetch_success=False, error="invalid fetch result type",
+            )
+
+        result = ParseResult(
+            url=url,
+            platform=platform,
+            platform_type=platform_type,
+            content_type=content_type,
+            title=fr.title or "",
+            content=fr.text or "",
+            raw_text=fr.text or "",
+            metadata=dict(fr.metadata) if fr.metadata else {},
+            fetch_success=fr.success,
+            error=fr.error,
+        )
+
+        # Extract bilibili video metadata from bb-browser structured data
+        meta = fr.metadata or {}
+        if 'bvid' in meta:
+            stat = meta.get('stat', {})
+            result.video_metadata = VideoMetadata(
+                duration=str(meta.get('duration', '')),
+                views=str(stat.get('view', '')),
+                likes=str(stat.get('like', '')),
+                coins=str(stat.get('coin', '')),
+                favorites=str(stat.get('favorite', '')),
+                danmaku=str(stat.get('danmaku', '')),
+            )
+            result.author = meta.get('author', '')
+
+        return result
 
     async def _do_parse(self, url: str, config: ParseConfig) -> ParseResult:
         """执行实际解析：parse -> transcribe"""

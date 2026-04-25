@@ -64,14 +64,21 @@ class ZhihuParser(ArticleParser):
                     '.Post-RichText',
                     '.RichContent-inner',
                     '.css-1yuhvjn',
-                    '.RichText'
+                    '.RichText',
+                    '.RichContent',
+                    'article',
+                    '.ContentItem-richText',
+                    '[itemprop="text"]',
                 ];
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el && el.innerText.trim().length > 100) return el.innerText;
+                }
                 for (const sel of selectors) {
                     const el = document.querySelector(sel);
                     if (el) return el.innerText;
                 }
-                const article = document.querySelector('article');
-                return article ? article.innerText : document.body.innerText;
+                return document.body.innerText;
             }''')
             result['content'] = content or ''
             result['raw_text'] = content or ''

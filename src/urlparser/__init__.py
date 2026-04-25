@@ -95,11 +95,11 @@ _ensure_env()
 # =============================================================================
 
 from .core import parse, parse_batch, parse_sync, UrlParser
-from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ComprehensionConfig
+from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ComprehensionConfig, RetryConfig
 from .models import (
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult, ArticleMetadata,
-    ComprehensionResult, VisualFrameResult,
+    ComprehensionResult, VisualFrameResult, RetryAttempt,
 )
 from .utils import (
     URLNormalizer, normalize_url, hash_url, detect_platform, is_video_url,
@@ -127,6 +127,7 @@ try:
         ZhihuParser, XiaohongshuParser, BilibiliParser, YoutubeParser,
         WeixinParser, GithubParser, GenericParser,
     )
+    from .parser.mixins.anti_scraping import AntiScrapingMixin
 except ImportError:
     pass
 
@@ -180,6 +181,7 @@ __all__ = [
     'TranscribeConfig',
     'BatchTranscribeConfig',
     'ComprehensionConfig',
+    'RetryConfig',
 
     'ParseResult',
     'PlatformType',
@@ -189,6 +191,7 @@ __all__ = [
     'ArticleMetadata',
     'ComprehensionResult',
     'VisualFrameResult',
+    'RetryAttempt',
 
     'BaseFetcher',
     'FetchResult',
@@ -212,6 +215,7 @@ __all__ = [
     'WeixinParser',
     'GithubParser',
     'GenericParser',
+    'AntiScrapingMixin',
 
     'BaseTranscriber',
     'FunASRTranscriber',

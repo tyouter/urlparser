@@ -192,6 +192,25 @@ class ArticleMetadata:
 
 
 @dataclass
+class RetryAttempt:
+    """单次重试记录"""
+    strategy: str = ""
+    success: bool = False
+    blocked_reason: Optional[str] = None
+    error: Optional[str] = None
+    duration: float = 0.0
+
+    def to_dict(self) -> Dict:
+        return {
+            'strategy': self.strategy,
+            'success': self.success,
+            'blocked_reason': self.blocked_reason,
+            'error': self.error,
+            'duration': self.duration,
+        }
+
+
+@dataclass
 class ParseResult:
     """
     统一解析结果
@@ -235,6 +254,9 @@ class ParseResult:
     fetch_success: bool = False
     error: Optional[str] = None
     parse_time: float = 0.0
+
+    retry_attempts: List[RetryAttempt] = field(default_factory=list)
+    final_strategy: str = ""
 
     @property
     def is_video(self) -> bool:
@@ -291,6 +313,8 @@ class ParseResult:
             'fetch_success': self.fetch_success,
             'error': self.error,
             'parse_time': self.parse_time,
+            'final_strategy': self.final_strategy,
+            'retry_attempts': [a.to_dict() for a in self.retry_attempts],
         }
 
     def to_markdown(self) -> str:
@@ -307,6 +331,10 @@ class ParseResult:
             lines.append(f"> **作者**: {self.author}")
         if self.publish_date:
             lines.append(f"> **发布**: {self.publish_date}")
+        if self.final_strategy:
+            lines.append(f"> **解析策略**: {self.final_strategy}")
+        if self.parse_time:
+            lines.append(f"> **解析时间**: {self.parse_time}s")
         lines.append("")
 
         if self.is_video and self.video_metadata:
@@ -318,6 +346,12 @@ class ParseResult:
                 lines.append(f"- 播放: {vm.views}")
             if vm.likes:
                 lines.append(f"- 点赞: {vm.likes}")
+            if vm.coins:
+                lines.append(f"- 投币: {vm.coins}")
+            if vm.favorites:
+                lines.append(f"- 收藏: {vm.favorites}")
+            if vm.danmaku:
+                lines.append(f"- 弹幕: {vm.danmaku}")
             if vm.tags:
                 lines.append(f"- 标签: {vm.tags}")
             lines.append("")
@@ -330,7 +364,22 @@ class ParseResult:
             lines.append("")
 
         if self.has_transcription:
-            lines.append(self.transcription.to_markdown())
+            tr = self.transcription
+            lines.append("## 语音转录")
+            lines.append(f"> 引擎: {tr.engine} | 时长: {tr.duration:.1f}s | 语言: {tr.language}")
+            lines.append("")
+            if tr.text:
+                lines.append(tr.text)
+            if tr.segments:
+                lines.append(f"\n### 时间戳分段 ({tr.segment_count} 段)\n")
+                for i, seg in enumerate(tr.segments[:50], 1):
+                    start = seg.get('start', 0)
+                    end = seg.get('end', 0)
+                    text = seg.get('text', '')
+                    h, m, s = int(start // 3600), int((start % 3600) // 60), int(start % 60)
+                    he, me, se = int(end // 3600), int((end % 3600) // 60), int(end % 60)
+                    lines.append(f"{i}. [{h:02d}:{m:02d}:{s:02d} - {he:02d}:{me:02d}:{se:02d}] {text}")
+            lines.append("")
 
         if self.has_comprehension:
             lines.append(self.comprehension.to_markdown())
@@ -339,6 +388,19 @@ class ParseResult:
             lines.append("## 元数据")
             for k, v in self.metadata.items():
                 lines.append(f"- {k}: {v}")
+            lines.append("")
+
+        if self.retry_attempts:
+            lines.append("## 重试记录")
+            for i, attempt in enumerate(self.retry_attempts, 1):
+                status = "成功" if attempt.success else "失败"
+                line = f"{i}. **{attempt.strategy}** → {status}"
+                if attempt.blocked_reason:
+                    line += f" ({attempt.blocked_reason})"
+                if attempt.error:
+                    line += f" | 错误: {attempt.error}"
+                line += f" ({attempt.duration:.1f}s)"
+                lines.append(line)
             lines.append("")
 
         return '\n'.join(lines)

@@ -64,6 +64,7 @@ class ParseResult:
     source_path: Optional[str] = None
     fetch_success: bool = False
     error: Optional[str] = None
+    has_transcription: bool = False
 
     @property
     def is_video(self) -> bool:

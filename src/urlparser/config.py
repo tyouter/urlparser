@@ -51,6 +51,16 @@ class ComprehensionConfig:
 
 
 @dataclass
+class RetryConfig:
+    """反爬绕过重试配置"""
+    enabled: bool = True
+    max_attempts: int = 4           # 最多重试次数
+    timeout_per_attempt: int = 30   # 每次重试超时(秒)
+    total_timeout: int = 120        # 所有重试总超时(秒)
+    min_quality_length: int = 100   # 最低内容长度
+
+
+@dataclass
 class ParseConfig:
     """
     统一解析配置
@@ -69,6 +79,7 @@ class ParseConfig:
     scroll: ScrollConfig = field(default_factory=ScrollConfig)
     transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
     comprehension: ComprehensionConfig = field(default_factory=ComprehensionConfig)
+    retry: RetryConfig = field(default_factory=RetryConfig)
 
     expand_full_text: bool = True
     close_login_popup: bool = True
@@ -145,6 +156,7 @@ __all__ = [
     'ScrollConfig',
     'TranscribeConfig',
     'ComprehensionConfig',
+    'RetryConfig',
     'ParseConfig',
     'BatchTranscribeConfig',
 ]

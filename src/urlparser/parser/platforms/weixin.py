@@ -41,15 +41,33 @@ class WeixinParser(ArticleParser):
 
         try:
             content = await page.evaluate('''() => {
-                const el = document.querySelector('#js_content') ||
-                           document.querySelector('.rich_media_content');
-                if (el) {
-                    const images = el.querySelectorAll('img');
-                    images.forEach(img => {
-                        const alt = img.getAttribute('alt') || '';
-                        img.replaceWith(`[图片: ${alt}]`);
-                    });
-                    return el.innerText;
+                const selectors = [
+                    '#js_content',
+                    '.rich_media_content',
+                    '.rich_media_area_primary',
+                    '#img-content',
+                ];
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el && el.innerText.trim().length > 100) {
+                        const images = el.querySelectorAll('img');
+                        images.forEach(img => {
+                            const alt = img.getAttribute('alt') || '';
+                            img.replaceWith(`[图片: ${alt}]`);
+                        });
+                        return el.innerText;
+                    }
+                }
+                for (const sel of selectors) {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        const images = el.querySelectorAll('img');
+                        images.forEach(img => {
+                            const alt = img.getAttribute('alt') || '';
+                            img.replaceWith(`[图片: ${alt}]`);
+                        });
+                        return el.innerText;
+                    }
                 }
                 return document.body.innerText;
             }''')

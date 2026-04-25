@@ -90,12 +90,20 @@ class BbBrowserFetcher(BaseFetcher):
         return self._bb_available
 
     async def _run_exec(self, cmd: List[str]) -> Tuple[str, str, int]:
-        """Run command using exec (no shell injection risk)."""
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        """Run bb-browser command. On Windows, use shell=True for .cmd wrappers."""
+        import sys
+        if sys.platform == 'win32':
+            proc = await asyncio.create_subprocess_shell(
+                ' '.join(cmd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         stdout, stderr = await proc.communicate()
         out = stdout.decode('utf-8', errors='replace').strip()
         err = stderr.decode('utf-8', errors='replace').strip()

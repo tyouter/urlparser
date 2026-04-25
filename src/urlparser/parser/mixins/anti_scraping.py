@@ -1,13 +1,32 @@
 """
 反爬虫处理 Mixin
+
+提供反爬检测、登录弹窗关闭、全文展开等能力。
 """
 
 import asyncio
 import urllib.parse
+from typing import Dict, List, Any, Optional, Tuple
 from playwright.async_api import Page
 
 
 class AntiScrapingMixin:
+
+    # ---- 反爬/登录墙检测模式 ----
+    BLOCKED_PATTERNS: Dict[str, List[Dict[str, Any]]] = {
+        "zhihu": [
+            {"type": "text_contains", "pattern": "没有知识存在的荒原"},
+            {"type": "text_contains", "pattern": "你似乎来到了没有知识存在的荒原"},
+            {"type": "login_wall", "login_keyword": "登录/注册", "min_count": 3, "max_text": 200},
+        ],
+        "xiaohongshu": [
+            {"type": "title_exact", "title": "小红书 - 你的生活兴趣社区"},
+            {"type": "login_and_empty", "login_keyword": "登录"},
+        ],
+        "weixin": [
+            {"type": "login_and_empty", "login_keyword": "登录"},
+        ],
+    }
 
     LOGIN_POPUP_SELECTORS = [
         '.Modal-closeButton',
@@ -113,3 +132,35 @@ class AntiScrapingMixin:
             return '北京智者天下科技有限公司' in content
 
         return True
+
+    @staticmethod
+    def detect_blocked(platform: str, title: str, text: str) -> Optional[str]:
+        """检测反爬/登录墙。返回 reason 字符串或 None。"""
+        patterns = AntiScrapingMixin.BLOCKED_PATTERNS.get(platform, [])
+        for pat in patterns:
+            ptype = pat["type"]
+            if ptype == "text_contains":
+                if pat["pattern"] in text:
+                    return f"blocked: text contains '{pat['pattern']}'"
+            elif ptype == "title_exact":
+                if title == pat["title"]:
+                    return f"blocked: title is '{pat['title']}'"
+            elif ptype == "login_wall":
+                count = text.count(pat["login_keyword"])
+                if count >= pat["min_count"] and len(text) < pat["max_text"]:
+                    return f"blocked: login wall ({count}x '{pat['login_keyword']}', {len(text)} chars)"
+            elif ptype == "login_and_empty":
+                has_login = pat["login_keyword"] in text
+                has_content = len(text.strip()) > 100
+                if has_login and not has_content:
+                    return "blocked: login prompt without real content"
+        return None
+
+    @staticmethod
+    def validate_quality(title: str, text: str, min_length: int = 100) -> Tuple[bool, str]:
+        """验证内容质量。返回 (passed, reason)。"""
+        if not text or len(text.strip()) < min_length:
+            return False, f"content too short ({len(text.strip()) if text else 0} chars, need {min_length})"
+        if not title or len(title.strip()) < 2:
+            return False, "title is empty or too short"
+        return True, "ok"

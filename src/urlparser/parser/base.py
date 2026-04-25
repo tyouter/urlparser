@@ -262,20 +262,32 @@ class VideoParser(BaseParser):
             if not is_video_url(url):
                 return await super().fetch(url)
 
-            # 在线模式：直接调用 LLM API，跳过 yt-dlp + 浏览器
             if self.config.parse_mode == "online":
                 return await self._fetch_online(url)
 
-            # 本地模式：yt-dlp 提取
             loop = asyncio.get_event_loop()
             content = await loop.run_in_executor(None, lambda: extract_video_info(url))
 
             if content.get('fetch_success'):
+                subtitles = content.get('subtitles', [])
+                has_subtitles = bool(subtitles)
+                description = content.get('description', '')
+
+                transcription_text = ""
+                transcription_method = ""
+
+                if not has_subtitles:
+                    transcription_text, transcription_method = await self._auto_transcribe(url)
+
+                combined_content = description
+                if transcription_text:
+                    combined_content += f"\n\n## Transcription ({transcription_method})\n\n{transcription_text}"
+
                 return ParseResult(
                     url=url,
                     platform=self.platform,
                     title=content.get('title', ''),
-                    content=content.get('description', ''),
+                    content=combined_content,
                     author=content.get('author', ''),
                     publish_date=content.get('publish_date_formatted', ''),
                     video_specific={
@@ -285,10 +297,13 @@ class VideoParser(BaseParser):
                         'coins': content.get('coins', ''),
                         'favorites': content.get('favorites', ''),
                         'tags': content.get('tags', ''),
-                        'subtitles': content.get('subtitles', []),
+                        'subtitles': subtitles,
+                        'transcription': transcription_text,
+                        'transcription_method': transcription_method,
                     },
                     metadata=content,
-                    fetch_success=True
+                    fetch_success=True,
+                    has_transcription=bool(transcription_text),
                 )
 
             return await super().fetch(url)
@@ -300,6 +315,150 @@ class VideoParser(BaseParser):
                 fetch_success=False,
                 error=str(e)
             )
+
+    async def _auto_transcribe(self, url: str) -> tuple:
+        import logging
+        logger = logging.getLogger(__name__)
+
+        try:
+            from ..transcriber import FunASRTranscriber
+
+            transcriber = FunASRTranscriber(model_size="large", device="auto")
+
+            if self.platform == "bilibili":
+                result = await self._transcribe_bilibili_via_api(url, transcriber)
+            else:
+                result = transcriber.transcribe_from_url(url, language="zh")
+
+            if result.success and result.text:
+                return result.text, "FunASR"
+            else:
+                logger.warning("Auto-transcription failed for %s: %s", url, result.error)
+                return "", ""
+
+        except ImportError:
+            logger.warning("FunASR not installed, skipping auto-transcription")
+            return "", ""
+        except Exception as e:
+            logger.warning("Auto-transcription error for %s: %s", url, str(e)[:200])
+            return "", ""
+
+    async def _transcribe_bilibili_via_api(self, url: str, transcriber) -> object:
+        import re as _re
+        import tempfile
+        import shutil
+        from pathlib import Path as _Path
+
+        bvid_match = _re.search(r'(BV[\w]+)', url)
+        if not bvid_match:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://www.bilibili.com",
+                }) as client:
+                    resp = await client.head(url, timeout=10)
+                    bvid_match = _re.search(r'(BV[\w]+)', str(resp.url))
+            except Exception:
+                pass
+
+        if not bvid_match:
+            from ..transcriber.base import TranscriptionResult
+            return TranscriptionResult(success=False, error="No BV ID found", engine="funasr")
+
+        bvid = bvid_match.group(1)
+
+        try:
+            import httpx
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+                "Referer": "https://www.bilibili.com",
+            }
+
+            async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+                resp = await client.get(f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}")
+                data = resp.json()
+
+                if data.get("code") != 0:
+                    from ..transcriber.base import TranscriptionResult
+                    return TranscriptionResult(success=False, error=f"API error: {data.get('message')}", engine="funasr")
+
+                v = data["data"]
+                cid = v.get("cid", 0)
+                duration = v.get("duration", 0)
+
+                if not cid or duration < 10:
+                    from ..transcriber.base import TranscriptionResult
+                    return TranscriptionResult(success=False, error="Video too short or no CID", engine="funasr")
+
+                resp2 = await client.get(
+                    f"https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}&qn=0&fnver=0&fnval=16&fourk=0"
+                )
+                data2 = resp2.json()
+
+                if data2.get("code") != 0:
+                    from ..transcriber.base import TranscriptionResult
+                    return TranscriptionResult(success=False, error=f"Playurl error: {data2.get('message')}", engine="funasr")
+
+                dash = data2.get("data", {}).get("dash", {})
+                audio_list = dash.get("audio", [])
+
+                if not audio_list:
+                    durl_list = data2.get("data", {}).get("durl", [])
+                    if durl_list:
+                        audio_url = durl_list[0].get("url", "")
+                    else:
+                        from ..transcriber.base import TranscriptionResult
+                        return TranscriptionResult(success=False, error="No audio stream", engine="funasr")
+                else:
+                    best_audio = max(audio_list, key=lambda x: x.get("bandwidth", 0))
+                    audio_url = best_audio.get("baseUrl") or best_audio.get("base_url") or best_audio.get("url", "")
+
+                    if not audio_url:
+                        backup_urls = best_audio.get("backupUrl", []) or best_audio.get("backup_url", [])
+                        if backup_urls:
+                            audio_url = backup_urls[0]
+
+                if not audio_url:
+                    from ..transcriber.base import TranscriptionResult
+                    return TranscriptionResult(success=False, error="No audio URL", engine="funasr")
+
+                if audio_url.startswith("//"):
+                    audio_url = "https:" + audio_url
+
+            temp_dir = tempfile.mkdtemp(prefix="bili_audio_")
+            try:
+                raw_audio = str(_Path(temp_dir) / "audio.m4s")
+                wav_audio = str(_Path(temp_dir) / "audio.wav")
+
+                download_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+                    "Referer": "https://www.bilibili.com",
+                }
+
+                async with httpx.AsyncClient(timeout=180, headers=download_headers, follow_redirects=True) as dl_client:
+                    async with dl_client.stream("GET", audio_url) as response:
+                        if response.status_code not in (200, 206):
+                            from ..transcriber.base import TranscriptionResult
+                            return TranscriptionResult(success=False, error=f"Audio download failed: HTTP {response.status_code}", engine="funasr")
+                        with open(raw_audio, "wb") as f:
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                f.write(chunk)
+
+                from ..transcriber.base import convert_audio_for_funasr
+                if not convert_audio_for_funasr(raw_audio, wav_audio):
+                    from ..transcriber.base import TranscriptionResult
+                    return TranscriptionResult(success=False, error="Audio conversion failed", engine="funasr")
+
+                return transcriber.transcribe(wav_audio, language="zh")
+
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        except Exception as e:
+            from ..transcriber.base import TranscriptionResult
+            return TranscriptionResult(success=False, error=f"Bilibili API error: {str(e)[:200]}", engine="funasr")
 
     async def _fetch_online(self, url: str) -> ParseResult:
         """在线模式：通过 LLM API 获取视频信息"""

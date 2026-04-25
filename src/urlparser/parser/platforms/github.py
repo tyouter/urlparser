@@ -73,11 +73,15 @@ class GithubParser(BaseParser):
 
         try:
             readme = await page.evaluate('''() => {
-                const el = document.querySelector('.readme article, .Box-body .markdown-body');
+                const el = document.querySelector('.readme article, .Box-body .markdown-body') ||
+                           document.querySelector('article.markdown-body') ||
+                           document.querySelector('.markdown-body');
                 if (el) return el.innerText;
                 return '';
             }''')
             result['raw_text'] = readme or ''
+            if readme and len(readme) > len(result.get('content', '')):
+                result['content'] = readme
         except Exception:
             result['raw_text'] = ''
 
