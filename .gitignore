@@ -87,5 +87,10 @@ timeline_*.md
 tests/test_comprehension_v*.json
 tests/test_output.json
 tests/test_video_comprehension_output.json
-tests/multi_platform/test_audio.wav
+tests/multi_platform/
+tests/output/
+tests/health_check/output/
+tests/framework/snapshots/
+tests/framework/regression_reports/
+tests/test_final.py
 tests/ES9*/
