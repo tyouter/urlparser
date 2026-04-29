@@ -72,6 +72,9 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# Archive (local only)
+_archive/
+
 # Project specific
 *.log
 data/
