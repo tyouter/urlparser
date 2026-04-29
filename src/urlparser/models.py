@@ -196,7 +196,7 @@ class RetryAttempt:
     """单次重试记录"""
     strategy: str = ""
     success: bool = False
-    blocked_reason: Optional[str] = None
+    access_restriction_reason: Optional[str] = None
     error: Optional[str] = None
     duration: float = 0.0
 
@@ -204,7 +204,7 @@ class RetryAttempt:
         return {
             'strategy': self.strategy,
             'success': self.success,
-            'blocked_reason': self.blocked_reason,
+            'access_restriction_reason': self.access_restriction_reason,
             'error': self.error,
             'duration': self.duration,
         }
@@ -393,8 +393,8 @@ class ParseResult:
             for i, attempt in enumerate(self.retry_attempts, 1):
                 status = "成功" if attempt.success else "失败"
                 line = f"{i}. **{attempt.strategy}** → {status}"
-                if attempt.blocked_reason:
-                    line += f" ({attempt.blocked_reason})"
+                if attempt.access_restriction_reason:
+                    line += f" ({attempt.access_restriction_reason})"
                 if attempt.error:
                     line += f" | 错误: {attempt.error}"
                 line += f" ({attempt.duration:.1f}s)"

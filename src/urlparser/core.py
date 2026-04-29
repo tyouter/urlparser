@@ -156,7 +156,7 @@ class UrlParser:
                 retry_attempts.append(RetryAttempt(
                     strategy=strategy_name,
                     success=False,
-                    blocked_reason=reason,
+                    access_restriction_reason=reason,
                     duration=elapsed,
                 ))
             else:
@@ -250,7 +250,7 @@ class UrlParser:
                     retry_attempts.append(RetryAttempt(
                         strategy=strategy_name,
                         success=False,
-                        blocked_reason=reason,
+                        access_restriction_reason=reason,
                         duration=elapsed,
                     ))
 

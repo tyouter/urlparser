@@ -1269,16 +1269,16 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
             item["fetch_elapsed"] = elapsed
 
             # Access restriction detection on fetched content
-            blocked_reason = None
+            access_restriction_reason = None
             if fr.success and fr.text:
-                blocked_reason = _detect_access_restriction(platform, fr.title or "", fr.text)
-            item["blocked_reason"] = blocked_reason
+                access_restriction_reason = _detect_access_restriction(platform, fr.title or "", fr.text)
+            item["access_restriction_reason"] = access_restriction_reason
 
-            if blocked_reason:
+            if access_restriction_reason:
                 item["fetch_success"] = False  # treat blocked as not usable
                 results.append(_skip(
                     f"fetch/{platform}/{uid}",
-                    blocked_reason,
+                    access_restriction_reason,
                     elapsed,
                     title=fr.title[:50] if fr.title else "",
                     content_length=item["text_length"],
@@ -1307,7 +1307,7 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
         except asyncio.TimeoutError:
             elapsed = time.time() - t0
             item["fetch_success"] = False
-            item["blocked_reason"] = None
+            item["access_restriction_reason"] = None
             if is_soft:
                 results.append(_skip(f"fetch/{platform}/{uid}", f"timeout (90s, soft-fail)", elapsed))
             else:
@@ -1315,7 +1315,7 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
         except Exception as e:
             elapsed = time.time() - t0
             item["fetch_success"] = False
-            item["blocked_reason"] = None
+            item["access_restriction_reason"] = None
             if is_soft:
                 results.append(_skip(f"fetch/{platform}/{uid}", f"soft-fail: {e}", elapsed))
             else:
@@ -1483,11 +1483,11 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
             continue
 
         # Re-check for blocked content on the fetched text
-        blocked_reason = _detect_access_restriction(platform, fr.title or "", fr.text)
-        if blocked_reason:
+        access_restriction_reason = _detect_access_restriction(platform, fr.title or "", fr.text)
+        if access_restriction_reason:
             results.append(_skip(
                 f"article/{platform}/{uid}",
-                blocked_reason,
+                access_restriction_reason,
                 item.get("fetch_elapsed", 0),
                 text_length=len(fr.text),
             ))

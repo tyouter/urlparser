@@ -512,7 +512,7 @@ def test_models(report: HealthReport) -> List[TestResult]:
         fetch_success=True,
         final_strategy="playwright",
         retry_attempts=[
-            RetryAttempt(strategy="playwright", success=False, blocked_reason="blocked: login wall", duration=1.5),
+            RetryAttempt(strategy="playwright", success=False, access_restriction_reason="blocked: access restriction", duration=1.5),
             RetryAttempt(strategy="bb_browser", success=True, duration=3.2),
         ],
     )
@@ -793,7 +793,7 @@ def test_content_quality(report: HealthReport) -> List[TestResult]:
     t0 = time.time()
     r1 = ContentQualityMixin.detect_access_restriction("zhihu", "", "你似乎来到了没有知识存在的荒原")
     r2 = ContentQualityMixin.detect_access_restriction("zhihu", "正常标题", "这是正常的长内容" * 50)
-    r3 = ContentQualityMixin.detect_access_restriction("zhihu", "", "登录/注册" * 5)  # login_wall
+    r3 = ContentQualityMixin.detect_access_restriction("zhihu", "", "登录/注册" * 5)  # access_restriction
     elapsed = time.time() - t0
     ok = r1 is not None and r2 is None and r3 is not None
     results.append(_pass("detect_access_restriction_zhihu", f"荒原={r1 is not None}, 正常={r2 is None}, 访问限制={r3 is not None}", elapsed) if ok
@@ -1055,7 +1055,7 @@ async def test_pipeline_validation(report: HealthReport) -> List[TestResult]:
         final_strategy="bb_browser",
         video_metadata=VideoMetadata(duration="10:30", views="10000", likes="500", coins="100", favorites="200", danmaku="300"),
         retry_attempts=[
-            RetryAttempt(strategy="playwright", success=False, blocked_reason="blocked: login wall", duration=2.1),
+            RetryAttempt(strategy="playwright", success=False, access_restriction_reason="blocked: access restriction", duration=2.1),
             RetryAttempt(strategy="bb_browser", success=True, duration=3.2),
         ],
     )
@@ -1067,7 +1067,7 @@ async def test_pipeline_validation(report: HealthReport) -> List[TestResult]:
         "retry_section": "playwright" in md and "bb_browser" in md,
         "retry_status": "2.1s" in md and "3.2s" in md,
         "video_section": "10:30" in md,
-        "blocked_reason": "login wall" in md,
+        "access_restriction_reason": "access restriction" in md,
     }
     elapsed = time.time() - t0
     failed_checks = [k for k, v in checks.items() if not v]
