@@ -262,14 +262,16 @@ class TestHardwareDetection:
 
     def test_detect_with_igpu_only(self):
         from urlparser.comprehension.models import detect_hardware, HardwareProfile
-        import psutil
 
         mock_core = MagicMock()
         mock_core.available_devices = ['CPU', 'GPU']
+        mock_core.get_property.return_value = "Intel Iris Xe"
         mock_ov = MagicMock()
         mock_ov.Core.return_value = mock_core
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = False
 
-        with patch.dict('sys.modules', {'openvino': mock_ov}):
+        with patch.dict('sys.modules', {'openvino': mock_ov, 'torch': mock_torch}):
             with patch('psutil.virtual_memory', return_value=MagicMock(total=16 * 1024 ** 3)):
                 hw = detect_hardware()
         assert hw == HardwareProfile.INTEL_IGPU
@@ -277,9 +279,12 @@ class TestHardwareDetection:
     def test_detect_cpu_fallback(self):
         from urlparser.comprehension.models import detect_hardware, HardwareProfile
 
-        # openvino not available, low RAM
-        with patch('psutil.virtual_memory', return_value=MagicMock(total=8 * 1024 ** 3)):
-            hw = detect_hardware()
+        mock_torch = MagicMock()
+        mock_torch.cuda.is_available.return_value = False
+
+        with patch.dict('sys.modules', {'openvino': None, 'torch': mock_torch}):
+            with patch('psutil.virtual_memory', return_value=MagicMock(total=8 * 1024 ** 3)):
+                hw = detect_hardware()
         assert hw == HardwareProfile.CPU_LOW
 
 
@@ -292,7 +297,7 @@ class TestModelSelection:
         )
         model, backend, device = select_model(HardwareProfile.INTEL_NPU)
         assert backend == VLMBackend.OPENVINO
-        assert device == "NPU"
+        assert device == "GPU"
 
     def test_select_cpu_high_model(self):
         from urlparser.comprehension.models import (

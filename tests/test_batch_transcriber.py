@@ -421,7 +421,6 @@ class TestProcessor:
         from urlparser.batch_transcriber import BatchTranscribeConfig
 
         config = BatchTranscribeConfig()
-        assert config.engine == "auto"
         assert config.model_size == "large"
         assert config.language == "zh"
         assert config.recursive
@@ -476,12 +475,11 @@ class TestProcessor:
         assert result.total_time_str == "20:00"
 
     def test_batch_transcriber_creation(self):
-        """测试 BatchTranscriber 创建"""
         from urlparser.batch_transcriber import BatchTranscriber, BatchTranscribeConfig
 
-        config = BatchTranscribeConfig(engine="funasr")
+        config = BatchTranscribeConfig(model_size="large")
         processor = BatchTranscriber(config)
-        assert processor.config.engine == "funasr"
+        assert processor.config.model_size == "large"
         assert processor.scanner
         assert processor.writer
 
