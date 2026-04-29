@@ -16,10 +16,10 @@ class PlaywrightFetcher(BaseFetcher):
     Playwright 直接读取器
 
     特性:
-    - Stealth 模式避免检测
+    - 兼容模式提升浏览器适配性
     - 智能滚动加载懒加载内容
-    - 自动关闭登录弹窗
-    - 自动展开全文
+    - 自动处理页面弹窗
+    - 自动加载完整内容
     """
 
     strategy = FetchStrategy.DIRECT
@@ -53,14 +53,14 @@ class PlaywrightFetcher(BaseFetcher):
             timezone_id=self.config.timezone_id
         )
 
-        if self.config.stealth_mode:
-            await self._add_stealth_scripts()
+        if self.config.compatibility_mode:
+            await self._add_compatibility_scripts()
 
-    async def _add_stealth_scripts(self):
+    async def _add_compatibility_scripts(self):
         if not self._context:
             return
 
-        stealth_js = """
+        compatibility_js = """
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         Object.defineProperty(navigator, 'plugins', {
             get: () => [
@@ -83,11 +83,11 @@ class PlaywrightFetcher(BaseFetcher):
         """
 
         try:
-            await self._context.add_init_script(stealth_js)
+            await self._context.add_init_script(compatibility_js)
         except Exception:
             pass
 
-    async def _close_login_popup(self, page: Page):
+    async def _dismiss_popups(self, page: Page):
         close_selectors = [
             '.Modal-closeButton',
             '[class*="close"]',
@@ -116,7 +116,7 @@ class PlaywrightFetcher(BaseFetcher):
         except Exception:
             pass
 
-    async def _expand_full_text(self, page: Page):
+    async def _load_full_content(self, page: Page):
         expand_selectors = [
             'button[class*="ExpandButton"]',
             'button:has-text("阅读全文")',
@@ -190,11 +190,11 @@ class PlaywrightFetcher(BaseFetcher):
                 await page.goto(url, timeout=timeout, wait_until='domcontentloaded')
                 await asyncio.sleep(2)
 
-                if self.config.close_login_popup:
-                    await self._close_login_popup(page)
+                if self.config.dismiss_popups:
+                    await self._dismiss_popups(page)
 
-                if self.config.expand_full_text:
-                    await self._expand_full_text(page)
+                if self.config.load_full_content:
+                    await self._load_full_content(page)
 
                 if self.config.scroll_enabled:
                     await self._scroll_to_load_all(page)

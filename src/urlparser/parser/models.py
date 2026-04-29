@@ -25,9 +25,9 @@ class ParserConfig:
     scroll_enabled: bool = True
     max_scrolls: int = 20
     scroll_delay: float = 1.5
-    expand_full_text: bool = True
-    close_login_popup: bool = True
-    stealth_mode: bool = True
+    load_full_content: bool = True
+    dismiss_popups: bool = True
+    compatibility_mode: bool = True
     parse_mode: str = "local"  # "local" | "online"
 
     def to_dict(self) -> Dict:
@@ -40,9 +40,9 @@ class ParserConfig:
             'scroll_enabled': self.scroll_enabled,
             'max_scrolls': self.max_scrolls,
             'scroll_delay': self.scroll_delay,
-            'expand_full_text': self.expand_full_text,
-            'close_login_popup': self.close_login_popup,
-            'stealth_mode': self.stealth_mode,
+            'load_full_content': self.load_full_content,
+            'dismiss_popups': self.dismiss_popups,
+            'compatibility_mode': self.compatibility_mode,
             'parse_mode': self.parse_mode,
         }
 

@@ -18,7 +18,7 @@ src/urlparser/
 ├── fetcher/             URL 读取层
 │   ├── base.py          BaseFetcher, FetchResult, FetchStrategy
 │   ├── factory.py       FetcherFactory (自动选择策略)
-│   ├── playwright_fetcher.py   Playwright Stealth 模式
+│   ├── playwright_fetcher.py   Playwright 兼容模式
 │   ├── cookie_fetcher.py       Cookie 认证模式
 │   ├── user_chrome_fetcher.py  用户浏览器 CDP 模式
 │   ├── bb_browser_fetcher.py   bb-browser daemon 模式
@@ -28,7 +28,7 @@ src/urlparser/
 │   ├── factory.py       ParserFactory, ParserRegistry
 │   ├── models.py        ParserConfig, ParserParseResult
 │   ├── mixins/          可复用解析逻辑
-│   │   ├── anti_scraping.py   反爬检测与绕过
+│   │   ├── content_quality.py   内容质量检测与访问适配
 │   │   ├── content_clean.py   内容清洗
 │   │   └── scrolling.py       滚动加载
 │   └── platforms/       平台适配器
@@ -99,7 +99,7 @@ playwright install chromium
 
 ```
 parse(url) → UrlParser.parse()
-  → FetcherFactory.create(config)  # 选择抓取策略
+  → FetcherFactory.create(config)  # 选择获取策略
     → PlaywrightFetcher / CookieFetcher / UserChromeFetcher / BrowserUseFetcher
   → ParserFactory.create(url)      # 选择解析器
     → ZhihuParser / BilibiliParser / GenericParser / ...
@@ -114,7 +114,7 @@ parse(url) → UrlParser.parse()
 - **可选依赖延迟加载**: transcriber/comprehension 模块在 `__init__.py` 中 try/except 导入
 - **环境变量**: `KMP_DUPLICATE_LIB_OK`, `HF_ENDPOINT`, `QWEN_API_KEY`, `DEEPSEEK_API_KEY`
 - **平台检测**: 基于 URL 模式匹配，在 `utils/url_utils.py` 中实现
-- **反爬检测**: `parser/mixins/anti_scraping.py` 检测登录墙/空白内容，触发策略切换
+- **访问限制检测**: `parser/mixins/content_quality.py` 检测访问限制/空白内容，触发策略切换
 
 ## 测试框架
 
@@ -124,7 +124,7 @@ parse(url) → UrlParser.parse()
 |------|------|------|
 | P0 | test_p0_pure_functions.py | 纯函数单元测试 (URL检测、文本清洗、模型构造) |
 | P1 | test_p1_property_based.py | Hypothesis 属性测试 (随机输入不变量) |
-| P2 | test_p2_anti_scraping.py | 反爬检测验证 (登录墙、内容完整性) |
+| P2 | test_p2_content_quality.py | 访问限制检测验证 (登录墙、内容完整性) |
 | P3 | test_p3_interface_consistency.py | API/CLI/SKILL 三接口一致性 |
 | P4 | test_p4_regression.py | 回归快照测试 (结构指纹) |
 | P5 | test_p5_equivalence.py | 内容等价性验证 (无截断、无丢失) |

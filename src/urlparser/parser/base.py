@@ -11,7 +11,7 @@ import json
 
 from .models import ParseResult, ParserConfig, PlatformType
 from .mixins.scrolling import ScrollingMixin
-from .mixins.anti_scraping import AntiScrapingMixin
+from .mixins.content_quality import ContentQualityMixin
 from .mixins.content_clean import ContentCleanMixin
 
 
@@ -87,11 +87,11 @@ class BaseParser(ABC):
         return result
 
     async def pre_process(self, page: Page):
-        if self.config.close_login_popup:
-            await AntiScrapingMixin.close_login_popup(page)
+        if self.config.dismiss_popups:
+            await ContentQualityMixin.dismiss_popups(page)
 
-        if self.config.expand_full_text:
-            await AntiScrapingMixin.expand_full_text(page)
+        if self.config.load_full_content:
+            await ContentQualityMixin.load_full_content(page)
 
     @abstractmethod
     async def extract_content(self, page: Page) -> Dict:
@@ -148,18 +148,18 @@ class BaseParser(ABC):
             timezone_id='Asia/Shanghai'
         )
 
-        if self.config.stealth_mode:
-            await self._add_stealth_scripts()
+        if self.config.compatibility_mode:
+            await self._add_compatibility_scripts()
 
         cookies = self._load_cookies()
         if cookies:
             await self.context.add_cookies(cookies)
 
-    async def _add_stealth_scripts(self):
+    async def _add_compatibility_scripts(self):
         if not self.context:
             return
 
-        stealth_js = """
+        compatibility_js = """
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         Object.defineProperty(navigator, 'plugins', {
             get: () => [
@@ -175,7 +175,7 @@ class BaseParser(ABC):
         """
 
         try:
-            await self.context.add_init_script(stealth_js)
+            await self.context.add_init_script(compatibility_js)
         except Exception:
             pass
 

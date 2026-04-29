@@ -127,7 +127,7 @@ try:
         ZhihuParser, XiaohongshuParser, BilibiliParser, YoutubeParser,
         WeixinParser, GithubParser, GenericParser,
     )
-    from .parser.mixins.anti_scraping import AntiScrapingMixin
+    from .parser.mixins.content_quality import ContentQualityMixin
 except ImportError:
     pass
 
@@ -215,7 +215,7 @@ __all__ = [
     'WeixinParser',
     'GithubParser',
     'GenericParser',
-    'AntiScrapingMixin',
+    'ContentQualityMixin',
 
     'BaseTranscriber',
     'FunASRTranscriber',

@@ -1190,11 +1190,11 @@ CONTENT_TYPE_MAP = {
     "generic": "webpage",
 }
 
-# Anti-scraping / blocked-content detection patterns
-from urlparser.parser.mixins.anti_scraping import AntiScrapingMixin
+# Access restriction / blocked-content detection patterns
+from urlparser.parser.mixins.content_quality import ContentQualityMixin
 
-BLOCKED_PATTERNS = AntiScrapingMixin.BLOCKED_PATTERNS
-_detect_blocked = AntiScrapingMixin.detect_blocked
+ACCESS_RESTRICTION_PATTERNS = ContentQualityMixin.ACCESS_RESTRICTION_PATTERNS
+_detect_access_restriction = ContentQualityMixin.detect_access_restriction
 
 
 async def test_network_parse(report: HealthReport) -> List[TestResult]:
@@ -1268,10 +1268,10 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
             item["metadata"] = {k: v for k, v in fr.metadata.items() if k != "raw_data"}
             item["fetch_elapsed"] = elapsed
 
-            # Anti-scraping detection on fetched content
+            # Access restriction detection on fetched content
             blocked_reason = None
             if fr.success and fr.text:
-                blocked_reason = _detect_blocked(platform, fr.title or "", fr.text)
+                blocked_reason = _detect_access_restriction(platform, fr.title or "", fr.text)
             item["blocked_reason"] = blocked_reason
 
             if blocked_reason:
@@ -1483,7 +1483,7 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
             continue
 
         # Re-check for blocked content on the fetched text
-        blocked_reason = _detect_blocked(platform, fr.title or "", fr.text)
+        blocked_reason = _detect_access_restriction(platform, fr.title or "", fr.text)
         if blocked_reason:
             results.append(_skip(
                 f"article/{platform}/{uid}",

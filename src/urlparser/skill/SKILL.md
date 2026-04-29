@@ -8,12 +8,11 @@ version: 3.3.0
 
 ## 触发条件
 
-用户要求解析/提取/爬取/抓取/读取任何 URL 或链接内容时触发。
+用户要求解析/提取/读取任何 URL 或链接内容时触发。
 
 **触发关键词**:
 - 解析 URL / 解析链接
 - 提取内容 / 提取文章
-- 爬取页面 / 抓取网页
 - 读取网页内容
 - 视频转录 / 音频转文字
 - 批量处理 URL
@@ -81,22 +80,22 @@ urlparser parse <youtube_url> --comprehension audio_video --comp-engine llamacpp
 
 | 平台 | 内容类型 | 特殊处理 |
 |------|---------|---------|
-| 知乎 | 问答/文章 | 自动展开全文、关闭登录弹窗 |
+| 知乎 | 问答/文章 | 自动加载完整内容、处理页面弹窗 |
 | B站 | 视频 | 视频信息提取、转录支持 |
 | YouTube | 视频 | 多语言转录 |
 | 微信公众号 | 文章 | Cookie 认证支持 |
-| 小红书 | 笔记 | 反爬绕过 |
+| 小红书 | 笔记 | 访问适配 |
 | GitHub | 仓库/Issue | README/代码提取 |
 | 通用网页 | 文章 | 智能内容提取 |
 
-## 反爬策略
+## 访问策略
 
 | 策略 | 适用场景 | 参数 |
 |------|---------|------|
-| Stealth 模式 | 大部分公开页面 | 默认启用 |
+| 兼容模式 | 大部分公开页面 | 默认启用 |
 | Cookie 认证 | 需要登录的页面 | `--cookies-file path` |
-| 用户浏览器 | 强反爬站点 | `--use-user-chrome` |
-| AI 自动化 | 极端反爬 | 需要 DEEPSEEK_API_KEY |
+| 用户浏览器 | 高安全站点 | `--use-user-chrome` |
+| AI 自动化 | 复杂访问场景 | 需要 DEEPSEEK_API_KEY |
 
 ## 使用示例
 
@@ -205,5 +204,5 @@ pip install funasr faster-whisper torch
 
 # 在线解析（可选，LLM API 模式）
 # 需要设置 QWEN_API_KEY 环境变量
-export QWEN_API_KEY="your-api-key"
+# 建议在 .env 文件中配置，参考 .env.example
 ```

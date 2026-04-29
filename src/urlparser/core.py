@@ -18,7 +18,7 @@ from .models import (
     create_result_from_parser,
 )
 from .parser import ParserFactory
-from .parser.mixins.anti_scraping import AntiScrapingMixin
+from .parser.mixins.content_quality import ContentQualityMixin
 from .transcriber import FunASRTranscriber, WhisperTranscriber
 from .utils import detect_platform, is_video_url
 from .comprehension import ComprehensionPipeline
@@ -139,10 +139,10 @@ class UrlParser:
             strategy_name = getattr(result, 'final_strategy', None) or 'auto'
 
             if result.fetch_success:
-                blocked = AntiScrapingMixin.detect_blocked(
+                blocked = ContentQualityMixin.detect_access_restriction(
                     platform, result.title, result.content
                 )
-                quality_ok, q_reason = AntiScrapingMixin.validate_quality(
+                quality_ok, q_reason = ContentQualityMixin.validate_quality(
                     result.title, result.content,
                     min_length=config.retry.min_quality_length,
                 )
@@ -218,10 +218,10 @@ class UrlParser:
                 )
 
                 # Check blocked + quality
-                blocked = AntiScrapingMixin.detect_blocked(
+                blocked = ContentQualityMixin.detect_access_restriction(
                     platform, candidate.title, candidate.content
                 )
-                quality_ok, q_reason = AntiScrapingMixin.validate_quality(
+                quality_ok, q_reason = ContentQualityMixin.validate_quality(
                     candidate.title, candidate.content,
                     min_length=config.retry.min_quality_length,
                 )
@@ -283,12 +283,12 @@ class UrlParser:
         fc = FetchConfig(
             timeout=60000,
             headless=config.browser.headless,
-            stealth_mode=config.browser.stealth_mode,
-            scroll_enabled=True,
-            max_scrolls=40,
-            scroll_delay=2.0,
-            expand_full_text=True,
-            close_login_popup=True,
+            compatibility_mode=config.browser.compatibility_mode,
+            scroll_enabled=config.scroll.enabled,
+            max_scrolls=config.scroll.max_scrolls,
+            scroll_delay=config.scroll.scroll_delay,
+            load_full_content=config.load_full_content,
+            dismiss_popups=config.dismiss_popups,
         )
         async with PlaywrightFetcher(fc) as fetcher:
             return await fetcher.fetch(url)
@@ -313,12 +313,12 @@ class UrlParser:
         fc = FetchConfig(
             cookies_file=config.browser.cookies_file,
             headless=config.browser.headless,
-            stealth_mode=config.browser.stealth_mode,
+            compatibility_mode=config.browser.compatibility_mode,
             scroll_enabled=config.scroll.enabled,
             max_scrolls=config.scroll.max_scrolls,
             scroll_delay=config.scroll.scroll_delay,
-            expand_full_text=config.expand_full_text,
-            close_login_popup=config.close_login_popup,
+            load_full_content=config.load_full_content,
+            dismiss_popups=config.dismiss_popups,
         )
         async with CookieFetcher(fc) as fetcher:
             return await fetcher.fetch(url)
@@ -335,8 +335,8 @@ class UrlParser:
             scroll_enabled=config.scroll.enabled,
             max_scrolls=config.scroll.max_scrolls,
             scroll_delay=config.scroll.scroll_delay,
-            expand_full_text=config.expand_full_text,
-            close_login_popup=config.close_login_popup,
+            load_full_content=config.load_full_content,
+            dismiss_popups=config.dismiss_popups,
         )
         async with UserChromeFetcher(fc) as fetcher:
             return await fetcher.fetch(url)
@@ -406,7 +406,7 @@ class UrlParser:
                         fr, url, platform, platform_type, content_type
                     )
 
-                    blocked = AntiScrapingMixin.detect_blocked(
+                    blocked = ContentQualityMixin.detect_access_restriction(
                         platform, result.title, result.content
                     )
                     if not blocked:

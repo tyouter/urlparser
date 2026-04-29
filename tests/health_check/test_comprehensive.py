@@ -4,7 +4,7 @@ urlparser v3.3.0 Comprehensive Health Check Test Suite
 Covers ALL public-facing features:
 - P0: Imports, URL/Text/File/Media/FFmpeg utils, Models, Config (8 categories)
 - P1: Cache, FileStorage, SourceDocument, StateManager (4 categories)
-- P2: AntiScrapingMixin, FetcherFactory (2 categories)
+- P2: ContentQualityMixin, FetcherFactory (2 categories)
 - P3: Network parsing - 22 URLs across 8 platforms
 - P4: Pipeline validation - retry, batch, cache, markdown format (5 categories)
 - P5: Local audio/video transcription (3 categories)
@@ -257,7 +257,7 @@ def test_imports(report: HealthReport) -> List[TestResult]:
         "SourceDocumentManager", "StateManager",
         "BatchTranscriber", "BatchTranscribeConfig",
         "MediaScanner", "SegmentHandler",
-        "AntiScrapingMixin",
+        "ContentQualityMixin",
     ]
     t0 = time.time()
     opt_ok = sum(1 for s in optional_symbols if hasattr(urlparser, s))
@@ -775,59 +775,59 @@ async def test_state_manager(report: HealthReport) -> List[TestResult]:
 
 
 # ---------------------------------------------------------------------------
-# P2: Anti-Scraping & Fetcher
+# P2: Content Quality & Fetcher
 # ---------------------------------------------------------------------------
 
-def test_anti_scraping(report: HealthReport) -> List[TestResult]:
-    from urlparser import AntiScrapingMixin
+def test_content_quality(report: HealthReport) -> List[TestResult]:
+    from urlparser import ContentQualityMixin
     results = []
 
-    # BLOCKED_PATTERNS
+    # ACCESS_RESTRICTION_PATTERNS
     t0 = time.time()
-    bp = AntiScrapingMixin.BLOCKED_PATTERNS
+    bp = ContentQualityMixin.ACCESS_RESTRICTION_PATTERNS
     ok = "zhihu" in bp and "xiaohongshu" in bp and "weixin" in bp
-    results.append(_pass("BLOCKED_PATTERNS", f"platforms: {list(bp.keys())}", time.time() - t0) if ok
-                   else _fail("BLOCKED_PATTERNS", f"missing platforms", time.time() - t0))
+    results.append(_pass("ACCESS_RESTRICTION_PATTERNS", f"platforms: {list(bp.keys())}", time.time() - t0) if ok
+                   else _fail("ACCESS_RESTRICTION_PATTERNS", f"missing platforms", time.time() - t0))
 
-    # detect_blocked - zhihu
+    # detect_access_restriction - zhihu
     t0 = time.time()
-    r1 = AntiScrapingMixin.detect_blocked("zhihu", "", "你似乎来到了没有知识存在的荒原")
-    r2 = AntiScrapingMixin.detect_blocked("zhihu", "正常标题", "这是正常的长内容" * 50)
-    r3 = AntiScrapingMixin.detect_blocked("zhihu", "", "登录/注册" * 5)  # login_wall
+    r1 = ContentQualityMixin.detect_access_restriction("zhihu", "", "你似乎来到了没有知识存在的荒原")
+    r2 = ContentQualityMixin.detect_access_restriction("zhihu", "正常标题", "这是正常的长内容" * 50)
+    r3 = ContentQualityMixin.detect_access_restriction("zhihu", "", "登录/注册" * 5)  # login_wall
     elapsed = time.time() - t0
     ok = r1 is not None and r2 is None and r3 is not None
-    results.append(_pass("detect_blocked_zhihu", f"荒原={r1 is not None}, 正常={r2 is None}, 登录墙={r3 is not None}", elapsed) if ok
-                   else _fail("detect_blocked_zhihu", f"r1={r1}, r2={r2}, r3={r3}", elapsed))
+    results.append(_pass("detect_access_restriction_zhihu", f"荒原={r1 is not None}, 正常={r2 is None}, 访问限制={r3 is not None}", elapsed) if ok
+                   else _fail("detect_access_restriction_zhihu", f"r1={r1}, r2={r2}, r3={r3}", elapsed))
 
-    # detect_blocked - xiaohongshu
+    # detect_access_restriction - xiaohongshu
     t0 = time.time()
-    r1 = AntiScrapingMixin.detect_blocked("xiaohongshu", "小红书 - 你的生活兴趣社区", "")
-    r2 = AntiScrapingMixin.detect_blocked("xiaohongshu", "真实标题", "真实内容" * 50)
+    r1 = ContentQualityMixin.detect_access_restriction("xiaohongshu", "小红书 - 你的生活兴趣社区", "")
+    r2 = ContentQualityMixin.detect_access_restriction("xiaohongshu", "真实标题", "真实内容" * 50)
     elapsed = time.time() - t0
     ok = r1 is not None and r2 is None
-    results.append(_pass("detect_blocked_xhs", f"默认标题={r1 is not None}, 正常={r2 is None}", elapsed) if ok
-                   else _fail("detect_blocked_xhs", f"r1={r1}, r2={r2}", elapsed))
+    results.append(_pass("detect_access_restriction_xhs", f"默认标题={r1 is not None}, 正常={r2 is None}", elapsed) if ok
+                   else _fail("detect_access_restriction_xhs", f"r1={r1}, r2={r2}", elapsed))
 
-    # detect_blocked - weixin
+    # detect_access_restriction - weixin
     t0 = time.time()
-    r1 = AntiScrapingMixin.detect_blocked("weixin", "", "登录查看更多")
-    r2 = AntiScrapingMixin.detect_blocked("weixin", "标题", "正文" * 100)
+    r1 = ContentQualityMixin.detect_access_restriction("weixin", "", "登录查看更多")
+    r2 = ContentQualityMixin.detect_access_restriction("weixin", "标题", "正文" * 100)
     elapsed = time.time() - t0
     ok = r1 is not None and r2 is None
-    results.append(_pass("detect_blocked_weixin", f"登录={r1 is not None}, 正常={r2 is None}", elapsed) if ok
-                   else _fail("detect_blocked_weixin", f"r1={r1}, r2={r2}", elapsed))
+    results.append(_pass("detect_access_restriction_weixin", f"登录={r1 is not None}, 正常={r2 is None}", elapsed) if ok
+                   else _fail("detect_access_restriction_weixin", f"r1={r1}, r2={r2}", elapsed))
 
     # validate_quality
     t0 = time.time()
-    q1_ok, q1_r = AntiScrapingMixin.validate_quality("标题", "a" * 200)
-    q2_ok, q2_r = AntiScrapingMixin.validate_quality("", "short")
-    q3_ok, q3_r = AntiScrapingMixin.validate_quality("标题", "short")
+    q1_ok, q1_r = ContentQualityMixin.validate_quality("标题", "a" * 200)
+    q2_ok, q2_r = ContentQualityMixin.validate_quality("", "short")
+    q3_ok, q3_r = ContentQualityMixin.validate_quality("标题", "short")
     elapsed = time.time() - t0
     ok = q1_ok and not q2_ok and not q3_ok
     results.append(_pass("validate_quality", f"正常={q1_ok}, 空标题={not q2_ok}, 短内容={not q3_ok}", elapsed) if ok
                    else _fail("validate_quality", f"q1={q1_ok}, q2={q2_ok}, q3={q3_ok}", elapsed))
 
-    report.add_batch("P2-AntiScraping", results)
+    report.add_batch("P2-ContentQuality", results)
     return results
 
 
@@ -891,7 +891,7 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
     """Fetch all 22 URLs via BbBrowserFetcher (fast CDP-based), then validate content."""
     from urlparser.fetcher.bb_browser_fetcher import BbBrowserFetcher
     from urlparser import safe_filename
-    from urlparser.parser.mixins.anti_scraping import AntiScrapingMixin
+    from urlparser.parser.mixins.content_quality import ContentQualityMixin
 
     results: List[TestResult] = []
     PARSED_DIR.mkdir(parents=True, exist_ok=True)
@@ -920,7 +920,7 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
                 has_content = bool(fr.text and len(fr.text) > 50)
 
                 # Check blocked
-                blocked = AntiScrapingMixin.detect_blocked(
+                blocked = ContentQualityMixin.detect_access_restriction(
                     platform, fr.title or "", fr.text or ""
                 )
 
@@ -979,10 +979,10 @@ async def test_network_parse(report: HealthReport) -> List[TestResult]:
 
 async def test_pipeline_validation(report: HealthReport) -> List[TestResult]:
     from urlparser import parse, ParseConfig, RetryConfig, UrlParser, parse_batch
-    from urlparser.parser.mixins.anti_scraping import AntiScrapingMixin
+    from urlparser.parser.mixins.content_quality import ContentQualityMixin
     results = []
 
-    # 4a: parse() with retry on a zhihu URL (likely to trigger anti-scraping)
+    # 4a: parse() with retry on a zhihu URL (likely to trigger access restriction)
     t0 = time.time()
     try:
         r = await parse("https://www.zhihu.com/answer/2009429788666909340",
@@ -1342,9 +1342,9 @@ async def run_all_tests():
     await test_source_document(report)
     await test_state_manager(report)
 
-    # P2: Anti-scraping & Fetcher
-    print("\n--- P2: 反爬与Fetcher ---")
-    test_anti_scraping(report)
+    # P2: Content Quality & Fetcher
+    print("\n--- P2: 访问限制与Fetcher ---")
+    test_content_quality(report)
     test_fetcher_factory(report)
 
     # P3: Network Parsing

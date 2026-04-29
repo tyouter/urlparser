@@ -4,7 +4,7 @@ urlparser 测试框架 - 共享 fixtures 和配置
 测试分层:
     P0 纯函数单元测试  (无网络, 无IO, 毫秒级)
     P1 模型/配置属性测试 (无网络, Hypothesis 属性基测试)
-    P2 反爬/质量检测测试 (无网络, 规则引擎验证)
+    P2 访问限制/质量检测测试 (无网络, 规则引擎验证)
     P3 接口一致性测试   (需网络, API/CLI/SKILL 输出交叉验证)
     P4 回归快照测试     (需网络, 输出与基准快照对比)
     P5 跨接口等价性测试 (需网络, 深度内容对比)
@@ -32,7 +32,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "slow: marks slow tests (transcription, etc.)")
     config.addinivalue_line("markers", "p0: pure function unit tests, no IO")
     config.addinivalue_line("markers", "p1: model/config property-based tests")
-    config.addinivalue_line("markers", "p2: anti-scraping/quality detection tests")
+    config.addinivalue_line("markers", "p2: access-restriction/quality detection tests")
     config.addinivalue_line("markers", "p3: interface consistency tests (needs network)")
     config.addinivalue_line("markers", "p4: regression snapshot tests (needs network)")
 

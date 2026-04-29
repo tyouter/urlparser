@@ -9,7 +9,7 @@ import urllib.parse
 
 from ..base import ArticleParser
 from ..models import ParserConfig
-from ..mixins.anti_scraping import AntiScrapingMixin
+from ..mixins.content_quality import ContentQualityMixin
 from ..mixins.content_clean import ContentCleanMixin
 
 
@@ -28,7 +28,7 @@ class XiaohongshuParser(ArticleParser):
     def __init__(self, config: ParserConfig = None):
         super().__init__(config)
         self.config.scroll_enabled = True
-        self.config.close_login_popup = True
+        self.config.dismiss_popups = True
 
     async def _fetch_with_page(self, page: Page, url: str):
         if 'redirectPath' in url:
@@ -59,7 +59,7 @@ class XiaohongshuParser(ArticleParser):
             return url
 
     async def pre_process(self, page: Page):
-        await AntiScrapingMixin.close_login_popup(page)
+        await ContentQualityMixin.dismiss_popups(page)
         await asyncio.sleep(1)
 
     async def extract_content(self, page: Page) -> Dict:
@@ -129,6 +129,6 @@ class XiaohongshuParser(ArticleParser):
         result = super().post_process(content)
 
         text = content.get('content', '') or content.get('raw_text', '')
-        result.metadata['is_login_blocked'] = AntiScrapingMixin.is_login_blocked(text, 'xiaohongshu')
+        result.metadata['is_access_restricted'] = ContentQualityMixin.is_access_restricted(text, 'xiaohongshu')
 
         return result

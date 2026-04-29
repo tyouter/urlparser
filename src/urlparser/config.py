@@ -17,7 +17,7 @@ class BrowserConfig:
     cookies_file: Optional[str] = None
     headless: bool = True
     timeout: int = 30000
-    stealth_mode: bool = True
+    compatibility_mode: bool = True
 
 
 @dataclass
@@ -79,8 +79,8 @@ class ParseConfig:
     comprehension: ComprehensionConfig = field(default_factory=ComprehensionConfig)
     retry: RetryConfig = field(default_factory=RetryConfig)
 
-    expand_full_text: bool = True
-    close_login_popup: bool = True
+    load_full_content: bool = True
+    dismiss_popups: bool = True
     parse_mode: str = "local"  # "local" | "online"
 
     @classmethod
@@ -117,11 +117,11 @@ class ParseConfig:
         return cls(
             browser=BrowserConfig(
                 headless=False,
-                stealth_mode=True,
+                compatibility_mode=True,
             ),
             scroll=ScrollConfig(enabled=True, max_scrolls=20),
-            expand_full_text=True,
-            close_login_popup=True,
+            load_full_content=True,
+            dismiss_popups=True,
             **kwargs
         )
 
@@ -138,9 +138,9 @@ class ParseConfig:
             scroll_enabled=self.scroll.enabled,
             max_scrolls=self.scroll.max_scrolls,
             scroll_delay=self.scroll.scroll_delay,
-            expand_full_text=self.expand_full_text,
-            close_login_popup=self.close_login_popup,
-            stealth_mode=self.browser.stealth_mode,
+            load_full_content=self.load_full_content,
+            dismiss_popups=self.dismiss_popups,
+            compatibility_mode=self.browser.compatibility_mode,
             parse_mode=self.parse_mode,
         )
 
@@ -151,12 +151,12 @@ class ParseConfig:
         return FetchConfig(
             timeout=self.browser.timeout,
             headless=self.browser.headless,
-            stealth_mode=self.browser.stealth_mode,
+            compatibility_mode=self.browser.compatibility_mode,
             scroll_enabled=self.scroll.enabled,
             max_scrolls=self.scroll.max_scrolls,
             scroll_delay=self.scroll.scroll_delay,
-            expand_full_text=self.expand_full_text,
-            close_login_popup=self.close_login_popup,
+            load_full_content=self.load_full_content,
+            dismiss_popups=self.dismiss_popups,
             cookies_file=self.browser.cookies_file,
             user_data_dir=self.browser.user_data_dir,
         )

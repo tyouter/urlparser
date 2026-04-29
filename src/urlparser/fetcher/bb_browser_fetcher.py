@@ -49,7 +49,7 @@ _TITLE_SELECTORS = {
     'www.sspai.com': '.article-title, h1',
 }
 
-_STRONG_ANTI_DOMAINS = [
+_HIGH_SECURITY_DOMAINS = [
     'zhihu.com',
     'xiaohongshu.com',
     'mp.weixin.qq.com',
@@ -346,9 +346,9 @@ class BbBrowserFetcher(BaseFetcher):
         return adapter, args
 
     @staticmethod
-    def _is_strong_anti_scraping(url: str) -> bool:
+    def _requires_enhanced_access(url: str) -> bool:
         domain = urlparse(url).netloc.lower()
-        return any(s in domain for s in _STRONG_ANTI_DOMAINS)
+        return any(s in domain for s in _HIGH_SECURITY_DOMAINS)
 
     @staticmethod
     def _parse_bb_result(bb_data: Dict[str, Any], url: str) -> FetchResult:

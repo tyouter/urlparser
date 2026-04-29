@@ -111,11 +111,11 @@ ffmpeg -i input -ss 0 -t 60 -vn -acodec pcm_s16le -ar 16000 -ac 1 output.wav
 | 11 | 源文档管理 | SourceDocumentManager CRUD + 索引 |
 | 12 | 状态管理 | StateManager normalize/hash/check_resource_state |
 
-### P2: 反爬与质量检测 (共 2 大项)
+### P2: 访问限制与质量检测 (共 2 大项)
 
 | # | 测试项 | 验证内容 |
 |---|--------|----------|
-| 13 | AntiScrapingMixin | BLOCKED_PATTERNS, detect_blocked() 各模式, validate_quality() |
+| 13 | ContentQualityMixin | ACCESS_RESTRICTION_PATTERNS, detect_access_restriction() 各模式, validate_quality() |
 | 14 | Fetcher 工厂 | 各策略实例化, FetcherFactory.auto_select 逻辑 |
 
 ### P3: 网络解析 (依赖网络 + bb-browser, 共 22 URL)
@@ -123,9 +123,9 @@ ffmpeg -i input -ss 0 -t 60 -vn -acodec pcm_s16le -ar 16000 -ac 1 output.wav
 | # | 测试项 | 验证内容 |
 |---|--------|----------|
 | 15 | Bilibili 解析 (3) | 视频元数据, 标题/作者/播放量 |
-| 16 | 知乎解析 (4) | 反爬检测 + 自动重试, 回答/专栏/想法 |
+| 16 | 知乎解析 (4) | 访问限制检测 + 自动重试, 回答/专栏/想法 |
 | 17 | 微信解析 (3) | 公众号文章内容提取 |
-| 18 | 小红书解析 (3) | 反爬检测 + 重试 |
+| 18 | 小红书解析 (3) | 访问限制检测 + 重试 |
 | 19 | Dribbble 解析 (3) | 设计页内容提取 |
 | 20 | GitHub 解析 (3) | README 提取 |
 | 21 | SSPAI 解析 (1) | 少数派文章 |
@@ -139,7 +139,7 @@ ffmpeg -i input -ss 0 -t 60 -vn -acodec pcm_s16le -ar 16000 -ac 1 output.wav
 | 24 | parse() 禁用重试 | RetryConfig(enabled=False) |
 | 25 | parse_batch() | 批量解析，并发控制 |
 | 26 | to_markdown() 格式 | 统一 MD: 策略/时间/视频信息/转录/重试记录 |
-| 27 | 缓存命中/失效 | 二次走缓存, force_refresh 绕过 |
+| 27 | 缓存命中/失效 | 二次走缓存, force_refresh 跳过缓存 |
 
 ### P5: 本地音视频转录 (共 3 大项)
 
@@ -202,7 +202,7 @@ tests/health_check/output/
 |------|------|
 | P0 | 所有基础设施测试 PASS (8 项) |
 | P1 | 所有存储层测试 PASS (4 项) |
-| P2 | 反爬检测测试 PASS (2 项) |
+| P2 | 访问限制检测测试 PASS (2 项) |
 | P3 | 网络解析 >= 70% URL 成功获取有效内容 (>= 15/22) |
 | P4 | 管线验证全部 PASS (5 项) |
 | P5 | 至少 1 个转录引擎工作 |
@@ -219,7 +219,7 @@ tests/health_check/output/
 |------|-----------|--------|------|
 | P0 基础设施 | 36/36 | 100% | 全通过 |
 | P1 存储层 | 15/15 | 100% | 全通过 |
-| P2 反爬/Fetcher | 7/7 | 100% | 全通过 |
+| P2 访问限制/Fetcher | 7/7 | 100% | 全通过 |
 | P3 网络解析 | 19/22 | 86% | 3个小红书被拦截(预期) |
 | P4 管线验证 | 5/5 | 100% | 全通过 |
 | P5 本地转录 | 5/5 | 100% | WAV+MP4转录均成功 |
@@ -227,7 +227,7 @@ tests/health_check/output/
 | P7 输出验证 | 3/3 | 100% | 37个MD文件已生成 |
 | **总计** | **92/95** | **96.8%** | **健康** |
 
-3个FAIL均为小红书登录重定向页被反爬检测正确拦截，属于预期行为。
+3个FAIL均为小红书登录重定向页被访问限制检测正确拦截，属于预期行为。
 
 ---
 

@@ -27,7 +27,7 @@ try:
             print(f'Size: {size_mb:.1f} MB')
 except Exception as e:
     print(f'Chrome cookies failed: {e}')
-    print('\nTrying with Wbi sign bypass...')
+    print('\nTrying with Wbi sign compatibility...')
     ydl_opts2 = {
         'quiet': False,
         'no_warnings': False,

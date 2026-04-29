@@ -63,12 +63,12 @@ class FetchConfig:
     """
     timeout: int = 30000
     headless: bool = True
-    stealth_mode: bool = True
+    compatibility_mode: bool = True
     scroll_enabled: bool = True
     max_scrolls: int = 20
     scroll_delay: float = 1.5
-    expand_full_text: bool = True
-    close_login_popup: bool = True
+    load_full_content: bool = True
+    dismiss_popups: bool = True
     cookies_file: Optional[str] = None
     user_data_dir: Optional[str] = None
     locale: str = 'zh-CN'

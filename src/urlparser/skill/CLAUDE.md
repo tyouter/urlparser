@@ -231,7 +231,7 @@ if not result.success:
     print(f"解析失败: {result.error}")
     # 常见错误:
     # - 网络超时: timeout
-    # - 反爬拦截: blocked
+    # - 访问限制: restricted
     # - 需要登录: login_required
     # - 页面不存在: not_found
 ```
@@ -239,7 +239,7 @@ if not result.success:
 ## 最佳实践
 
 1. **优先使用缓存**: 默认启用双层缓存，避免重复解析
-2. **选择合适策略**: 知乎/小红书等强反爬站点使用 Cookie 或用户浏览器
+2. **选择合适策略**: 知乎/小红书等高安全站点使用 Cookie 或用户浏览器
 3. **转录引擎选择**: 中文视频用 FunASR，多语言用 Whisper
-4. **批量并发控制**: 建议并发数 3-5，避免触发反爬
+4. **批量并发控制**: 建议并发数 3-5，避免触发访问限制
 5. **输出格式**: Markdown 适合阅读，JSON 适合程序处理

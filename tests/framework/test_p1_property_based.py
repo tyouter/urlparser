@@ -253,8 +253,8 @@ class TestParseConfigFactories:
     def test_full_feature(self):
         config = ParseConfig.full_feature()
         assert config.scroll.enabled is True
-        assert config.expand_full_text is True
-        assert config.close_login_popup is True
+        assert config.load_full_content is True
+        assert config.dismiss_popups is True
 
     def test_to_parser_config_roundtrip(self):
         config = ParseConfig(

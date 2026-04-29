@@ -67,7 +67,7 @@ result = await parse(url, config=ParseConfig.with_transcribe())
 The tool automatically selects the best fetch strategy:
 
 1. bb-browser (CDP) - reuses user's logged-in browser session
-2. Playwright - headless browser with anti-scraping
+2. Playwright - headless browser with compatibility mode
 3. Cookie-based - uses exported cookies
 4. Direct fetch - for simple pages
 
