@@ -121,7 +121,7 @@ class UrlParser:
             )
 
     async def _parse_with_retry(self, url: str, config: ParseConfig) -> ParseResult:
-        """带反爬绕过重试的解析流程"""
+        """带多策略回退的解析流程"""
         platform = detect_platform(url)
         is_vid = is_video_url(url)
         content_type = ContentType.VIDEO if is_vid else ContentType.ARTICLE
@@ -130,11 +130,13 @@ class UrlParser:
         retry_attempts: List[RetryAttempt] = []
         start_total = time.time()
 
-        # --- Attempt 1: standard Playwright parser ---
+        # --- Attempt 1: auto_select fetcher -> fallback parser ---
         attempt_start = time.time()
         try:
             result = await self._do_parse(url, config)
             elapsed = round(time.time() - attempt_start, 2)
+
+            strategy_name = getattr(result, 'final_strategy', None) or 'auto'
 
             if result.fetch_success:
                 blocked = AntiScrapingMixin.detect_blocked(
@@ -146,13 +148,13 @@ class UrlParser:
                 )
 
                 if not blocked and quality_ok:
-                    result.final_strategy = "playwright"
+                    result.final_strategy = strategy_name
                     result.retry_attempts = retry_attempts
                     return result
 
                 reason = blocked or q_reason
                 retry_attempts.append(RetryAttempt(
-                    strategy="playwright",
+                    strategy=strategy_name,
                     success=False,
                     blocked_reason=reason,
                     duration=elapsed,
@@ -383,12 +385,46 @@ class UrlParser:
         return result
 
     async def _do_parse(self, url: str, config: ParseConfig) -> ParseResult:
-        """执行实际解析：parse -> transcribe"""
+        """执行实际解析：auto_select fetcher -> fallback parser -> transcribe"""
         platform = detect_platform(url)
         is_vid = is_video_url(url)
 
         content_type = ContentType.VIDEO if is_vid else ContentType.ARTICLE
         platform_type = self._detect_platform_type(platform)
+
+        from .fetcher.factory import FetcherFactory
+        from .fetcher.base import FetchResult
+
+        fetch_config = config.to_fetch_config()
+        fetcher = FetcherFactory.auto_select(url, fetch_config)
+
+        if fetcher is not None:
+            try:
+                fr = await fetcher.fetch(url)
+                if fr and fr.success and fr.has_content:
+                    result = self._fetch_result_to_parse_result(
+                        fr, url, platform, platform_type, content_type
+                    )
+
+                    blocked = AntiScrapingMixin.detect_blocked(
+                        platform, result.title, result.content
+                    )
+                    if not blocked:
+                        if is_vid and config.transcribe.enabled and result.fetch_success:
+                            result.transcription = await self._transcribe_audio(url, config.transcribe)
+                        if is_vid and config.comprehension.enabled and result.fetch_success:
+                            result.comprehension = await self._run_comprehension(
+                                url, config.comprehension, result.transcription
+                            )
+                        result.final_strategy = fetcher.strategy.value
+                        return result
+            except Exception:
+                pass
+            finally:
+                try:
+                    await fetcher.close()
+                except Exception:
+                    pass
 
         parser_config = config.to_parser_config()
         parser = ParserFactory.create(url, config=parser_config)
@@ -426,18 +462,21 @@ class UrlParser:
             await parser.close()
 
     async def _transcribe_audio(self, url: str, transcribe_config) -> TranscriptionResult:
-        """音频转录"""
+        """音频转录 - 通过 ensure_transcribe_dependencies 保证依赖"""
         try:
-            engine = transcribe_config.engine
-            if engine == "auto":
-                engine = "funasr" if transcribe_config.language == "zh" else "whisper"
+            from .dependency_installer import ensure_transcribe_dependencies
 
-            if engine == "funasr":
+            if not ensure_transcribe_dependencies(auto_install=True):
+                return TranscriptionResult(success=False, error="Transcription dependencies not available")
+
+            if FunASRTranscriber.is_available():
+                engine = "funasr"
                 transcriber = FunASRTranscriber(
                     model_size=transcribe_config.model_size,
                     device=transcribe_config.device,
                 )
             else:
+                engine = "whisper"
                 transcriber = WhisperTranscriber(
                     model_size=transcribe_config.model_size,
                     device=transcribe_config.device,

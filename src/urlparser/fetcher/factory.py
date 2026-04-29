@@ -77,7 +77,7 @@ class FetcherFactory:
         根据 URL 和配置自动选择最佳策略
 
         优先级:
-        1. bb-browser (支持的平台 + 已安装)
+        1. bb-browser (已安装的浏览器自动化工具)
         2. Cookie (有 cookies_file)
         3. UserChrome (有 user_data_dir)
         4. Playwright (默认)
@@ -93,21 +93,12 @@ class FetcherFactory:
 
         bb_fetcher = BbBrowserFetcher(config)
         if bb_fetcher._check_bb_browser():
-            adapter_args = BbBrowserFetcher._extract_adapter_and_args(url)
-            if adapter_args:
-                return bb_fetcher
+            return bb_fetcher
 
         if config.cookies_file:
             return CookieFetcher(config)
 
         if config.user_data_dir:
             return UserChromeFetcher(config)
-
-        domain = urlparse(url).netloc.lower()
-
-        strong_anti_scraping = ['zhihu.com', 'xiaohongshu.com']
-        if any(s in domain for s in strong_anti_scraping):
-            if config.cookies_file:
-                return CookieFetcher(config)
 
         return PlaywrightFetcher(config)

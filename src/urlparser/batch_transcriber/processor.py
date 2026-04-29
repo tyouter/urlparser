@@ -22,17 +22,16 @@ from .writer import TranscriptionWriter, WriterConfig
 @dataclass
 class BatchTranscribeConfig:
     """批量转录配置"""
-    engine: str = "auto"           # funasr/whisper/auto
-    model_size: str = "large"      # 模型大小
-    device: str = "auto"           # 设备
-    language: str = "zh"           # 语言
-    recursive: bool = True         # 递归扫描
-    skip_existing: bool = True     # 跳过已有转录
-    segment_threshold_min: float = 30.0  # 分段时长阈值（分钟）
-    max_file_size_mb: float = 500.0      # 最大文件大小阈值（MB）
-    show_progress: bool = True     # 显示进度
-    confirm_before_start: bool = True    # 开始前确认
-    output_dir: Optional[str] = None     # 输出目录（None 表示保存到源文件同目录）
+    model_size: str = "large"
+    device: str = "auto"
+    language: str = "zh"
+    recursive: bool = True
+    skip_existing: bool = True
+    segment_threshold_min: float = 30.0
+    max_file_size_mb: float = 500.0
+    show_progress: bool = True
+    confirm_before_start: bool = True
+    output_dir: Optional[str] = None
 
     def get_segment_threshold_seconds(self) -> float:
         """获取分段阈值（秒）"""
@@ -148,11 +147,7 @@ class BatchTranscriber:
         if self.transcriber is not None:
             return
 
-        engine = self.config.engine
-        if engine == "auto":
-            engine = "funasr" if self.config.language == "zh" else "whisper"
-
-        if engine == "funasr":
+        if FunASRTranscriber.is_available():
             self.transcriber = FunASRTranscriber(
                 model_size=self.config.model_size,
                 device=self.config.device

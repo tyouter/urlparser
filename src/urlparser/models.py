@@ -358,9 +358,7 @@ class ParseResult:
 
         if self.content:
             lines.append("## 内容摘要")
-            lines.append(self.content[:5000])
-            if len(self.content) > 5000:
-                lines.append(f"\n... (共 {self.content_length} 字符)")
+            lines.append(self.content)
             lines.append("")
 
         if self.has_transcription:

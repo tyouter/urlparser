@@ -43,6 +43,22 @@ class FunASRTranscriber(BaseTranscriber):
         self.device = device
         self._model = None
 
+    @staticmethod
+    def is_available() -> bool:
+        try:
+            import funasr
+            return True
+        except ImportError:
+            return False
+
+    @staticmethod
+    def detect_device() -> str:
+        try:
+            import torch
+            return "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            return "cpu"
+
     def _load_model(self):
         if self._model is not None:
             return

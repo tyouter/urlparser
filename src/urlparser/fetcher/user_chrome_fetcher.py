@@ -15,12 +15,12 @@ class UserChromeFetcher(PlaywrightFetcher):
     """
     用户浏览器读取器
 
-    使用用户已登录的 Chrome 浏览器状态，绕过登录验证
+    使用用户已登录的 Chrome 浏览器状态获取内容
 
     特性:
     - 复用用户 Chrome 登录状态
     - 无需手动导出 Cookie
-    - 适合强反爬站点
+    - 适合需要登录态的站点
     """
 
     strategy = FetchStrategy.USER_CHROME

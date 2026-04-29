@@ -1,7 +1,7 @@
 """
-反爬虫处理 Mixin
+内容质量检测 Mixin
 
-提供反爬检测、登录弹窗关闭、全文展开等能力。
+提供页面质量验证、登录弹窗关闭、全文展开等能力。
 """
 
 import asyncio
@@ -12,7 +12,7 @@ from playwright.async_api import Page
 
 class AntiScrapingMixin:
 
-    # ---- 反爬/登录墙检测模式 ----
+    # ---- 页面质量检测模式 ----
     BLOCKED_PATTERNS: Dict[str, List[Dict[str, Any]]] = {
         "zhihu": [
             {"type": "text_contains", "pattern": "没有知识存在的荒原"},
@@ -135,7 +135,7 @@ class AntiScrapingMixin:
 
     @staticmethod
     def detect_blocked(platform: str, title: str, text: str) -> Optional[str]:
-        """检测反爬/登录墙。返回 reason 字符串或 None。"""
+        """检测页面是否需要登录。返回 reason 字符串或 None。"""
         patterns = AntiScrapingMixin.BLOCKED_PATTERNS.get(platform, [])
         for pat in patterns:
             ptype = pat["type"]

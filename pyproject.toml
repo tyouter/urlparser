@@ -8,7 +8,7 @@ license = {text = "MIT"}
 authors = [
     {name = "KnowHow Team", email = "knowhow@example.com"}
 ]
-keywords = ["url", "parser", "scraper", "transcriber", "knowledge-management"]
+keywords = ["url", "parser", "content-extractor", "transcriber", "knowledge-management"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

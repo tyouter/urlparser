@@ -6,7 +6,7 @@
 使用方式:
     from urlparser.batch_transcriber import BatchTranscriber, BatchTranscribeConfig
 
-    config = BatchTranscribeConfig(engine="funasr", skip_existing=True)
+    config = BatchTranscribeConfig(skip_existing=True)
     processor = BatchTranscriber(config)
 
     # 扫描目录

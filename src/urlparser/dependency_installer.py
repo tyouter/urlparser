@@ -410,11 +410,12 @@ def ensure_all_dependencies(
 
 def ensure_transcribe_dependencies(auto_install: bool = True) -> bool:
     """
-    确保转录依赖已安装
+    确保转录依赖已安装（唯一入口）
 
-    这是转录功能的主要入口，会检查并安装：
-    - ffmpeg
-    - funasr 或 faster-whisper（根据需要）
+    策略:
+    1. ffmpeg（必须）
+    2. FunASR（首选，中英文均优先）→ 安装失败才尝试 Whisper
+    3. faster-whisper（备选）→ FunASR 不可用时使用
 
     Args:
         auto_install: 是否自动安装
@@ -424,28 +425,30 @@ def ensure_transcribe_dependencies(auto_install: bool = True) -> bool:
     """
     logger.info("\n检查转录依赖...")
 
-    # 检查 ffmpeg
     ffmpeg_ok, _ = ensure_dependency("ffmpeg", auto_install)
 
-    # 检查 funasr（中文转录首选）
     funasr_ok, _ = ensure_dependency("funasr", auto_install)
 
-    # 检查 faster-whisper（多语言支持）
+    if funasr_ok:
+        if ffmpeg_ok:
+            logger.info("转录依赖检查完成: ffmpeg + FunASR")
+            return True
+        else:
+            logger.warning("转录依赖检查完成: FunASR 可用但 ffmpeg 缺失")
+            return False
+
     whisper_ok, _ = ensure_dependency("faster-whisper", auto_install)
 
-    # 至少需要一个转录引擎
-    engine_ok = funasr_ok or whisper_ok
+    if whisper_ok:
+        if ffmpeg_ok:
+            logger.info("转录依赖检查完成: ffmpeg + Whisper (FunASR 不可用)")
+            return True
+        else:
+            logger.warning("转录依赖检查完成: Whisper 可用但 ffmpeg 缺失")
+            return False
 
-    if ffmpeg_ok and engine_ok:
-        logger.info("转录依赖检查完成，功能可用")
-        return True
-    else:
-        logger.warning("转录依赖检查完成，部分依赖缺失")
-        if not ffmpeg_ok:
-            logger.warning("  - ffmpeg 缺失，无法处理音视频")
-        if not engine_ok:
-            logger.warning("  - 转录引擎缺失，需要安装 funasr 或 faster-whisper")
-        return False
+    logger.warning("转录依赖检查完成: 无可用引擎 (FunASR 和 Whisper 均安装失败)")
+    return False
 
 
 def ensure_core_dependencies(auto_install: bool = True) -> bool:

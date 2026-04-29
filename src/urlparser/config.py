@@ -32,7 +32,6 @@ class ScrollConfig:
 class TranscribeConfig:
     """音频转录配置"""
     enabled: bool = False
-    engine: str = "auto"
     model_size: str = "large"
     device: str = "auto"
     language: str = "zh"
@@ -52,7 +51,7 @@ class ComprehensionConfig:
 
 @dataclass
 class RetryConfig:
-    """反爬绕过重试配置"""
+    """多策略回退重试配置"""
     enabled: bool = True
     max_attempts: int = 4           # 最多重试次数
     timeout_per_attempt: int = 30   # 每次重试超时(秒)
@@ -69,7 +68,6 @@ class ParseConfig:
         config = ParseConfig(
             enable_transcribe=True,
             cookies_file="cookies/zhihu_cookies.json",
-            transcribe_engine="funasr",
         )
 
         result = await parse(url, config=config)
@@ -91,9 +89,9 @@ class ParseConfig:
         return cls(**kwargs)
 
     @classmethod
-    def with_transcribe(cls, engine: str = "auto", **kwargs):
+    def with_transcribe(cls, **kwargs):
         """启用转录的配置"""
-        transcribe = TranscribeConfig(enabled=True, engine=engine)
+        transcribe = TranscribeConfig(enabled=True)
         return cls(transcribe=transcribe, **kwargs)
 
     @classmethod
@@ -144,6 +142,23 @@ class ParseConfig:
             close_login_popup=self.close_login_popup,
             stealth_mode=self.browser.stealth_mode,
             parse_mode=self.parse_mode,
+        )
+
+    def to_fetch_config(self):
+        """转换为 fetcher 模块的 FetchConfig"""
+        from .fetcher.base import FetchConfig
+
+        return FetchConfig(
+            timeout=self.browser.timeout,
+            headless=self.browser.headless,
+            stealth_mode=self.browser.stealth_mode,
+            scroll_enabled=self.scroll.enabled,
+            max_scrolls=self.scroll.max_scrolls,
+            scroll_delay=self.scroll.scroll_delay,
+            expand_full_text=self.expand_full_text,
+            close_login_popup=self.close_login_popup,
+            cookies_file=self.browser.cookies_file,
+            user_data_dir=self.browser.user_data_dir,
         )
 
 

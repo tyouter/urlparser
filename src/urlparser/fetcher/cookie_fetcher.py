@@ -1,7 +1,7 @@
 """
 Cookie 认证读取器
 
-使用 Cookie 文件绕过反爬虫
+使用 Cookie 文件提供已认证的页面访问
 """
 
 import json

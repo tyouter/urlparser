@@ -1,5 +1,5 @@
 """
-AI 反爬读取器
+AI 浏览器自动化读取器
 
 使用 browser-use 库进行 AI 驱动的浏览器自动化
 """
@@ -13,9 +13,9 @@ from .base import BaseFetcher, FetchResult, FetchConfig, FetchStrategy
 
 class BrowserUseFetcher(BaseFetcher):
     """
-    AI 反爬读取器
+    AI 浏览器自动化读取器
 
-    使用 DeepSeek 驱动的浏览器自动化，处理极端反爬场景
+    使用 DeepSeek 驱动的浏览器自动化，处理复杂页面交互场景
 
     特性:
     - AI 驱动的浏览器操作

@@ -33,8 +33,6 @@ def main():
                         help="输出格式（默认 markdown）")
     parser.add_argument("--transcribe", "-t", action="store_true",
                         help="启用视频/音频转录")
-    parser.add_argument("--engine", choices=["auto", "funasr", "whisper"], default="auto",
-                        help="转录引擎（默认 auto）")
     parser.add_argument("--cookies-file", "-c", help="Cookie 文件路径")
     parser.add_argument("--use-user-chrome", "-u", action="store_true",
                         help="使用用户 Chrome 浏览器状态")
@@ -49,11 +47,9 @@ def main():
 
     args = parser.parse_args()
 
-    # 执行解析
     result = asyncio.run(_parse_url(args))
 
-    # 输出结果
-    if not result.success:
+    if not result.fetch_success:
         print(f"解析失败: {result.error}", file=sys.stderr)
         sys.exit(1)
 
@@ -69,16 +65,16 @@ def main():
 async def _parse_url(args):
     """执行 URL 解析"""
     from urlparser import parse, ParseConfig
+    from urlparser.config import BrowserConfig, TranscribeConfig
 
     config = ParseConfig(
-        enable_transcribe=args.transcribe,
-        transcribe_engine=args.engine,
-        cookies_file=args.cookies_file,
-        use_user_chrome=args.use_user_chrome,
-        no_cache=args.no_cache,
-        timeout=args.timeout,
-        headless=args.headless,
-        output_format=args.format,
+        transcribe=TranscribeConfig(enabled=args.transcribe),
+        browser=BrowserConfig(
+            cookies_file=args.cookies_file,
+            use_user_chrome=args.use_user_chrome,
+            headless=args.headless,
+            timeout=args.timeout,
+        ),
     )
 
     return await parse(args.url, config=config)
@@ -87,44 +83,56 @@ async def _parse_url(args):
 def _format_output(result, format_type):
     """格式化输出"""
     if format_type == "json":
-        return json.dumps({
+        data = {
             "url": result.url,
             "title": result.title,
             "content": result.content,
             "author": result.author,
-            "platform": result.platform.value if result.platform else None,
+            "platform": result.platform,
             "content_type": result.content_type.value if result.content_type else None,
-            "success": result.success,
+            "fetch_success": result.fetch_success,
             "error": result.error,
-            "video_metadata": result.video_metadata.__dict__ if result.video_metadata else None,
-            "transcription": {
-                "text": result.transcription.text,
-                "segments": result.transcription.segments,
-            } if result.transcription else None,
+            "parse_time": result.parse_time,
+            "final_strategy": result.final_strategy,
             "metadata": result.metadata,
-        }, ensure_ascii=False, indent=2)
+        }
+        if result.video_metadata and result.video_metadata.duration:
+            data["video_metadata"] = {
+                "duration": result.video_metadata.duration,
+                "views": result.video_metadata.views,
+                "likes": result.video_metadata.likes,
+                "coins": result.video_metadata.coins,
+                "favorites": result.video_metadata.favorites,
+            }
+        if result.has_transcription:
+            data["transcription"] = {
+                "text": result.transcription.text,
+                "engine": result.transcription.engine,
+            }
+        return json.dumps(data, ensure_ascii=False, indent=2)
 
-    # Markdown 格式
     lines = [
         f"# {result.title or '无标题'}",
         "",
         f"**作者**: {result.author or '未知'}",
-        f"**平台**: {result.platform.value if result.platform else '未知'}",
+        f"**平台**: {result.platform or '未知'}",
         f"**URL**: {result.url}",
-        f"**解析时间**: {result.metadata.get('parse_time', '未知')}",
+        f"**策略**: {result.final_strategy or '未知'}",
+        f"**耗时**: {result.parse_time:.1f}s" if result.parse_time else "**耗时**: 未知",
         "",
         "---",
         "",
     ]
 
-    if result.video_metadata:
+    if result.video_metadata and result.video_metadata.duration:
         lines.extend([
             "## 视频信息",
             "",
-            f"- **标题**: {result.video_metadata.title}",
-            f"- **时长**: {result.video_metadata.duration}s",
-            f"- **作者**: {result.video_metadata.author}",
-            f"- **播放量**: {result.video_metadata.view_count}",
+            f"- **时长**: {result.video_metadata.duration}",
+            f"- **播放量**: {result.video_metadata.views}",
+            f"- **点赞**: {result.video_metadata.likes}",
+            f"- **投币**: {result.video_metadata.coins}",
+            f"- **收藏**: {result.video_metadata.favorites}",
             "",
         ])
 
@@ -135,7 +143,7 @@ def _format_output(result, format_type):
         "",
     ])
 
-    if result.transcription:
+    if result.has_transcription:
         lines.extend([
             "## 转录文本",
             "",

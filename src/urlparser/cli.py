@@ -35,11 +35,10 @@ urlparser CLI 接口
 
     # 音频转录
     python -m urlparser transcribe audio.mp3
-    python -m urlparser transcribe https://www.bilibili.com/video/BVxxx --engine funasr
+    python -m urlparser transcribe https://www.bilibili.com/video/BVxxx
 
     # 批量转录文件夹
     python -m urlparser transcribe-folder ./videos --preview
-    python -m urlparser transcribe-folder ./videos --engine funasr
     python -m urlparser transcribe-folder ./videos --force --no-confirm
 
     # 安装 Claude Code Skill
@@ -81,7 +80,6 @@ def _add_parse_parser(subparsers):
     p = subparsers.add_parser('parse', help='解析单个 URL')
     p.add_argument('url', help='要解析的 URL')
     p.add_argument('--transcribe', '-t', action='store_true', help='启用音频转录')
-    p.add_argument('--engine', default='auto', choices=['auto', 'funasr', 'whisper'], help='转录引擎')
     p.add_argument('--model-size', default='large', help='模型大小')
     p.add_argument('--cookies', help='Cookie 文件路径')
     p.add_argument('--user-chrome', action='store_true', help='使用用户 Chrome 浏览器')
@@ -102,7 +100,6 @@ def _add_parse_batch_parser(subparsers):
     p = subparsers.add_parser('parse-batch', help='批量解析 URL')
     p.add_argument('file', help='包含 URL 的文件路径（每行一个 URL，或 Markdown 链接格式）')
     p.add_argument('--transcribe', '-t', action='store_true', help='启用音频转录')
-    p.add_argument('--engine', default='auto', choices=['auto', 'funasr', 'whisper'], help='转录引擎')
     p.add_argument('--cookies', help='Cookie 文件路径')
     p.add_argument('--user-chrome', action='store_true', help='使用用户 Chrome 浏览器')
     p.add_argument('--output-dir', '-o', default='./parsed_results', help='输出目录')
@@ -155,7 +152,6 @@ def _add_video_info_parser(subparsers):
 def _add_transcribe_parser(subparsers):
     p = subparsers.add_parser('transcribe', help='音频转录')
     p.add_argument('input', help='音频文件路径或视频 URL')
-    p.add_argument('--engine', default='auto', choices=['auto', 'funasr', 'whisper'], help='转录引擎')
     p.add_argument('--model-size', default='large', help='模型大小')
     p.add_argument('--language', default='zh', help='语言')
     p.add_argument('--device', default='auto', choices=['auto', 'cuda', 'cpu'], help='计算设备')
@@ -170,9 +166,6 @@ def _add_transcribe_folder_parser(subparsers):
         help='批量转录本地文件夹内的音视频文件'
     )
     p.add_argument('directory', help='要扫描的文件夹路径')
-    p.add_argument('--engine', default='auto',
-                   choices=['auto', 'funasr', 'whisper'],
-                   help='转录引擎 (auto=根据语言自动选择)')
     p.add_argument('--model-size', default='large',
                    choices=['small', 'base', 'large', 'sensevoice'],
                    help='模型大小')
@@ -250,7 +243,6 @@ async def cmd_parse(args):
     config = ParseConfig(
         transcribe=TranscribeConfig(
             enabled=args.transcribe,
-            engine=args.engine,
             model_size=args.model_size,
         ),
         browser=BrowserConfig(
@@ -293,7 +285,6 @@ async def cmd_parse_batch(args):
     config = ParseConfig(
         transcribe=TranscribeConfig(
             enabled=args.transcribe,
-            engine=args.engine,
         ),
         browser=BrowserConfig(
             cookies_file=args.cookies,
@@ -429,11 +420,7 @@ async def cmd_transcribe(args):
         print("请使用 'urlparser install-deps --transcribe' 安装依赖")
         return
 
-    engine = args.engine
-    if engine == 'auto':
-        engine = 'funasr' if args.language == 'zh' else 'whisper'
-
-    if engine == 'funasr':
+    if FunASRTranscriber.is_available():
         transcriber = FunASRTranscriber(model_size=args.model_size, device=args.device)
     else:
         transcriber = WhisperTranscriber(model_size=args.model_size, device=args.device)
@@ -492,7 +479,6 @@ async def cmd_transcribe_folder(args):
 
     # 创建配置
     config = BatchTranscribeConfig(
-        engine=args.engine,
         model_size=args.model_size,
         device=args.device,
         language=args.language,

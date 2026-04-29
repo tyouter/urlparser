@@ -67,7 +67,7 @@ class BbBrowserFetcher(BaseFetcher):
     - 复用用户浏览器登录态
     - 获取结构化 JSON 数据（比 HTML 解析更精准）
     - 自动匹配平台 adapter
-    - Bilibili 音频流下载（绕过 412 反爬）
+    - Bilibili 音频流下载（带登录态的媒体获取）
     - 带登录态的 HTTP 请求 (bb-browser fetch)
     - CDP eval fallback (open + eval 获取页面内容)
 
@@ -93,8 +93,9 @@ class BbBrowserFetcher(BaseFetcher):
         """Run bb-browser command. On Windows, use shell=True for .cmd wrappers."""
         import sys
         if sys.platform == 'win32':
+            quoted = ' '.join(f'"{c}"' if ' ' in c or '&' in c or '?' in c else c for c in cmd)
             proc = await asyncio.create_subprocess_shell(
-                ' '.join(cmd),
+                quoted,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

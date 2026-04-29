@@ -5,7 +5,7 @@ URL 读取层
 - PlaywrightFetcher: Playwright 直接读取
 - CookieFetcher: Cookie 认证读取
 - UserChromeFetcher: 用户浏览器读取
-- BrowserUseFetcher: AI 反爬读取
+- BrowserUseFetcher: AI 浏览器自动化读取
 - BbBrowserFetcher: bb-browser CDP 读取（复用登录态）
 """
 
