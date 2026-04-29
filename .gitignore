@@ -65,8 +65,9 @@ venv.bak/
 *.swp
 *.swo
 
-# Claude Code local config
-.claude/
+# Claude Code local config (keep skills, ignore session data)
+.claude/todos/
+.claude/projects/
 
 # OS
 .DS_Store

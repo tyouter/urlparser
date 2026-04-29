@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(ffprobe:*)",
+      "Bash(ls:*)",
+      "Bash(ps aux:*)",
+      "Bash(python:*)",
+      "Bash(tasklist:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(git log:*)",
+      "Bash(git:*)",
+      "Bash(git rev-list:*)",
+      "Bash(git cat-file:*)"
+    ]
+  }
+}
