@@ -24,8 +24,8 @@ class BrowserConfig:
 class ScrollConfig:
     """滚动配置"""
     enabled: bool = True
-    max_scrolls: int = 20
-    scroll_delay: float = 1.5
+    max_scrolls: int = 40
+    scroll_delay: float = 2.0
 
 
 @dataclass
@@ -119,7 +119,7 @@ class ParseConfig:
                 headless=False,
                 compatibility_mode=True,
             ),
-            scroll=ScrollConfig(enabled=True, max_scrolls=20),
+            scroll=ScrollConfig(enabled=True, max_scrolls=40),
             load_full_content=True,
             dismiss_popups=True,
             **kwargs

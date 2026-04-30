@@ -23,8 +23,8 @@ class ParserConfig:
     timeout: int = 30000
     headless: bool = True
     scroll_enabled: bool = True
-    max_scrolls: int = 20
-    scroll_delay: float = 1.5
+    max_scrolls: int = 40
+    scroll_delay: float = 2.0
     load_full_content: bool = True
     dismiss_popups: bool = True
     compatibility_mode: bool = True
