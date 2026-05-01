@@ -332,6 +332,7 @@ class UrlParser:
         fc = FetchConfig(
             user_data_dir=config.browser.user_data_dir,
             headless=False,
+            compatibility_mode=config.browser.compatibility_mode,
             scroll_enabled=config.scroll.enabled,
             max_scrolls=config.scroll.max_scrolls,
             scroll_delay=config.scroll.scroll_delay,
@@ -392,39 +393,42 @@ class UrlParser:
         content_type = ContentType.VIDEO if is_vid else ContentType.ARTICLE
         platform_type = self._detect_platform_type(platform)
 
-        from .fetcher.factory import FetcherFactory
-        from .fetcher.base import FetchResult
+        parser_first_platforms = {'xiaohongshu'}
 
-        fetch_config = config.to_fetch_config()
-        fetcher = FetcherFactory.auto_select(url, fetch_config)
+        if platform not in parser_first_platforms:
+            from .fetcher.factory import FetcherFactory
+            from .fetcher.base import FetchResult
 
-        if fetcher is not None:
-            try:
-                fr = await fetcher.fetch(url)
-                if fr and fr.success and fr.has_content:
-                    result = self._fetch_result_to_parse_result(
-                        fr, url, platform, platform_type, content_type
-                    )
+            fetch_config = config.to_fetch_config()
+            fetcher = FetcherFactory.auto_select(url, fetch_config)
 
-                    blocked = ContentQualityMixin.detect_access_restriction(
-                        platform, result.title, result.content
-                    )
-                    if not blocked:
-                        if is_vid and config.transcribe.enabled and result.fetch_success:
-                            result.transcription = await self._transcribe_audio(url, config.transcribe)
-                        if is_vid and config.comprehension.enabled and result.fetch_success:
-                            result.comprehension = await self._run_comprehension(
-                                url, config.comprehension, result.transcription
-                            )
-                        result.final_strategy = fetcher.strategy.value
-                        return result
-            except Exception:
-                pass
-            finally:
+            if fetcher is not None:
                 try:
-                    await fetcher.close()
+                    fr = await fetcher.fetch(url)
+                    if fr and fr.success and fr.has_content:
+                        result = self._fetch_result_to_parse_result(
+                            fr, url, platform, platform_type, content_type
+                        )
+
+                        blocked = ContentQualityMixin.detect_access_restriction(
+                            platform, result.title, result.content
+                        )
+                        if not blocked:
+                            if is_vid and config.transcribe.enabled and result.fetch_success:
+                                result.transcription = await self._transcribe_audio(url, config.transcribe)
+                            if is_vid and config.comprehension.enabled and result.fetch_success:
+                                result.comprehension = await self._run_comprehension(
+                                    url, config.comprehension, result.transcription
+                                )
+                            result.final_strategy = fetcher.strategy.value
+                            return result
                 except Exception:
                     pass
+                finally:
+                    try:
+                        await fetcher.close()
+                    except Exception:
+                        pass
 
         parser_config = config.to_parser_config()
         parser = ParserFactory.create(url, config=parser_config)

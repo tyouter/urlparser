@@ -136,7 +136,7 @@ class PlaywrightFetcher(BaseFetcher):
             except Exception:
                 continue
 
-        for text in ['阅读全文', '展开', '查看全部', 'Show more']:
+        for text in ['阅读全文', '展开', '查看全部', 'Show more', 'Read more']:
             try:
                 btn = page.get_by_text(text, exact=True)
                 if await btn.count() > 0:
