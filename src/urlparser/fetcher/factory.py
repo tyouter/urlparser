@@ -71,25 +71,31 @@ class FetcherFactory:
 
         return PlaywrightFetcher(config)
 
+    _COOKIE_PRIORITY_PLATFORMS = {'zhihu', 'xiaohongshu', 'weixin'}
+
     @classmethod
     def auto_select(cls, url: str, config: Optional[FetchConfig] = None) -> BaseFetcher:
-        """
-        根据 URL 和配置自动选择最佳策略
-
-        优先级:
-        1. bb-browser (已安装的浏览器自动化工具)
-        2. Cookie (有 cookies_file 或自动提取成功)
-        3. UserChrome (有 user_data_dir)
-        4. Playwright (默认)
-
-        Args:
-            url: 目标 URL
-            config: 读取配置
-
-        Returns:
-            BaseFetcher 实例
-        """
         config = config or FetchConfig()
+
+        platform = cls._detect_platform(url)
+
+        if platform in cls._COOKIE_PRIORITY_PLATFORMS:
+            if config.cookies_file:
+                return CookieFetcher(config)
+            cookies_file = cls._try_auto_cookies(url)
+            if cookies_file:
+                config = FetchConfig(
+                    timeout=config.timeout,
+                    headless=config.headless,
+                    compatibility_mode=config.compatibility_mode,
+                    scroll_enabled=config.scroll_enabled,
+                    max_scrolls=config.max_scrolls,
+                    scroll_delay=config.scroll_delay,
+                    load_full_content=config.load_full_content,
+                    dismiss_popups=config.dismiss_popups,
+                    cookies_file=cookies_file,
+                )
+                return CookieFetcher(config)
 
         bb_fetcher = BbBrowserFetcher(config)
         if bb_fetcher._check_bb_browser():
@@ -117,6 +123,14 @@ class FetcherFactory:
             return UserChromeFetcher(config)
 
         return PlaywrightFetcher(config)
+
+    @classmethod
+    def _detect_platform(cls, url: str) -> str:
+        try:
+            from ..utils import detect_platform
+            return detect_platform(url)
+        except Exception:
+            return ''
 
     @classmethod
     def _try_auto_cookies(cls, url: str) -> Optional[str]:
