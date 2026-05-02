@@ -60,13 +60,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/urlparser"]
-# Include Skill files as package_data
-artifacts = ["src/urlparser/skill/**/*"]
 
 [tool.hatch.build]
 include = [
     "src/urlparser/**/*.py",
-    "src/urlparser/skill/**/*",
 ]
 
 [tool.pytest.ini_options]

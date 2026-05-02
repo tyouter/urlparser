@@ -268,11 +268,11 @@ class ParseResult:
 
     @property
     def has_transcription(self) -> bool:
-        return self.transcription and self.transcription.success
+        return self.transcription is not None and self.transcription.success and bool(self.transcription.text and self.transcription.text.strip())
 
     @property
     def has_comprehension(self) -> bool:
-        return self.comprehension and self.comprehension.success
+        return self.comprehension is not None and self.comprehension.success
 
     @property
     def content_length(self) -> int:
@@ -368,7 +368,10 @@ class ParseResult:
             lines.append("")
             if tr.text:
                 lines.append(tr.text)
-            if tr.segments:
+            has_valid_segments = tr.segments and any(
+                seg.get('text', '').strip() for seg in tr.segments
+            )
+            if has_valid_segments:
                 lines.append(f"\n### 时间戳分段 ({tr.segment_count} 段)\n")
                 for i, seg in enumerate(tr.segments[:50], 1):
                     start = seg.get('start', 0)
@@ -382,12 +385,6 @@ class ParseResult:
         if self.has_comprehension:
             lines.append(self.comprehension.to_markdown())
 
-        if self.metadata:
-            lines.append("## 元数据")
-            for k, v in self.metadata.items():
-                lines.append(f"- {k}: {v}")
-            lines.append("")
-
         if self.retry_attempts:
             lines.append("## 重试记录")
             for i, attempt in enumerate(self.retry_attempts, 1):
@@ -399,6 +396,11 @@ class ParseResult:
                     line += f" | 错误: {attempt.error}"
                 line += f" ({attempt.duration:.1f}s)"
                 lines.append(line)
+            lines.append("")
+
+        if self.error:
+            lines.append("## 错误信息")
+            lines.append(self.error)
             lines.append("")
 
         return '\n'.join(lines)
@@ -452,5 +454,23 @@ def create_result_from_parser(parser_result) -> ParseResult:
             tags=vs.get('tags', ''),
             subtitles=vs.get('subtitles'),
         )
+
+        if vs.get('has_subtitles') and vs.get('subtitles'):
+            subtitle_text = "\n".join(
+                s.get('text', '') for s in vs['subtitles'] if s.get('text')
+            )
+            valid_segments = [s for s in vs['subtitles'] if s.get('entries')]
+            duration = vs.get('duration_seconds', 0.0)
+            if subtitle_text.strip() or valid_segments:
+                result.transcription = TranscriptionResult(
+                    success=True,
+                    text=subtitle_text,
+                    duration=float(duration) if duration else 0.0,
+                    engine="subtitle",
+                    segments=vs['subtitles'],
+                )
+
+        if vs.get('needs_transcription'):
+            result.metadata['needs_transcription'] = True
 
     return result

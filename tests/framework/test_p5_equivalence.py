@@ -1,7 +1,7 @@
 """
 P5: 跨接口内容等价性测试
 
-深度验证 API / CLI / SKILL 三种接口对同一 URL 产生的内容是否等价。
+深度验证 API / CLI 两种接口对同一 URL 产生的内容是否等价。
 这是 P3 的增强版，专注于内容层面的深度对比。
 
 检测维度:
@@ -65,26 +65,6 @@ def _run_cli(url: str, output_path: str) -> bool:
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "urlparser", "parse", url,
-             "--format", "markdown", "--output", output_path],
-            capture_output=True, timeout=180,
-            env={**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE",
-                 "HF_ENDPOINT": "https://hf-mirror.com"},
-        )
-        return proc.returncode == 0 and os.path.exists(output_path)
-    except Exception:
-        return False
-
-
-def _run_skill(url: str, output_path: str) -> bool:
-    skill_script = os.path.normpath(os.path.join(
-        os.path.dirname(__file__), "..", "..", "src",
-        "urlparser", "skill", "scripts", "parse.py"
-    ))
-    if not os.path.exists(skill_script):
-        return False
-    try:
-        proc = subprocess.run(
-            [sys.executable, skill_script, url,
              "--format", "markdown", "--output", output_path],
             capture_output=True, timeout=180,
             env={**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE",
@@ -160,16 +140,6 @@ class TestNoTruncationAcrossInterfaces:
             md = f.read()
         content_body = _extract_content_from_md(md)
         assert "... (共" not in content_body, "CLI output truncated"
-
-    def test_skill_no_truncation(self, article_urls, tmp_path):
-        url = article_urls[0]
-        skill_output = str(tmp_path / "skill_notrunc.md")
-        if not _run_skill(url.url, skill_output):
-            pytest.skip("SKILL parse failed")
-        with open(skill_output, encoding="utf-8") as f:
-            md = f.read()
-        content_body = _extract_content_from_md(md)
-        assert "... (共" not in content_body, "SKILL output truncated"
 
 
 class TestJSONOutputConsistency:

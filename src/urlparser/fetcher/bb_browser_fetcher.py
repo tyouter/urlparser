@@ -89,6 +89,18 @@ class BbBrowserFetcher(BaseFetcher):
         self._bb_available = shutil.which('bb-browser') is not None
         return self._bb_available
 
+    def _is_daemon_error(self, err: str) -> bool:
+        return 'Chrome not connected' in err or 'CDP' in err or 'Daemon HTTP 503' in err
+
+    async def _try_restart_daemon(self) -> bool:
+        try:
+            out, err, code = await self._run_exec(['bb-browser', 'daemon', 'shutdown'])
+            await asyncio.sleep(1)
+            out, err, code = await self._run_exec(['bb-browser', 'tab', 'list'])
+            return code == 0
+        except Exception:
+            return False
+
     async def _run_exec(self, cmd: List[str]) -> Tuple[str, str, int]:
         """Run bb-browser command. On Windows, use shell=True for .cmd wrappers."""
         import sys
@@ -192,12 +204,14 @@ class BbBrowserFetcher(BaseFetcher):
         if title_selector:
             try:
                 js = f"document.querySelector('{title_selector}')?.innerText"
-                title = await self.bb_eval(js) or ''
+                result = await self.bb_eval(js)
+                title = str(result) if isinstance(result, str) else ''
             except Exception:
                 pass
         if not title:
             try:
-                title = await self.bb_eval("document.title") or ''
+                result = await self.bb_eval("document.title")
+                title = str(result) if isinstance(result, str) else ''
             except Exception:
                 pass
 
@@ -205,10 +219,12 @@ class BbBrowserFetcher(BaseFetcher):
         content = ''
         try:
             js = f"document.querySelector('{selector}').innerText"
-            content = await self.bb_eval(js) or ''
+            result = await self.bb_eval(js)
+            content = str(result) if isinstance(result, str) else ''
         except Exception:
             try:
-                content = await self.bb_eval("document.body.innerText") or ''
+                result = await self.bb_eval("document.body.innerText")
+                content = str(result) if isinstance(result, str) else ''
             except Exception:
                 pass
 
@@ -472,8 +488,18 @@ class BbBrowserFetcher(BaseFetcher):
             result = self._parse_bb_result(bb_data, url)
             if result.success and result.text and len(result.text) > 50:
                 return result
-        except Exception:
-            pass
+        except Exception as e:
+            err_str = str(e)
+            if self._is_daemon_error(err_str):
+                restarted = await self._try_restart_daemon()
+                if restarted:
+                    try:
+                        bb_data = await self._run_bb_browser(adapter, args)
+                        result = self._parse_bb_result(bb_data, url)
+                        if result.success and result.text and len(result.text) > 50:
+                            return result
+                    except Exception:
+                        pass
 
         return await self._fetch_via_open_and_read(url)
 
@@ -488,7 +514,7 @@ class BbBrowserFetcher(BaseFetcher):
         try:
             title, content = await self.bb_open_and_read(url)
 
-            if not content:
+            if not content or not content.strip():
                 return FetchResult(
                     url=url,
                     strategy=FetchStrategy.BB_BROWSER,
@@ -529,6 +555,45 @@ class BbBrowserFetcher(BaseFetcher):
                 },
             )
         except Exception as e:
+            err_str = str(e)
+            if self._is_daemon_error(err_str):
+                restarted = await self._try_restart_daemon()
+                if restarted:
+                    try:
+                        title, content = await self.bb_open_and_read(url)
+                        if content and content.strip():
+                            domain = urlparse(url).netloc.lower()
+                            platform = 'unknown'
+                            if 'bilibili.com' in domain:
+                                platform = 'bilibili'
+                            elif 'zhihu.com' in domain:
+                                platform = 'zhihu'
+                            elif 'xiaohongshu.com' in domain:
+                                platform = 'xiaohongshu'
+                            elif 'mp.weixin.qq.com' in domain:
+                                platform = 'weixin'
+                            elif 'sspai.com' in domain:
+                                platform = 'sspai'
+                            text_parts = []
+                            if title:
+                                text_parts.append(f"# {title}")
+                            text_parts.append(f"\n{content}")
+                            text = '\n'.join(text_parts)
+                            return FetchResult(
+                                url=url,
+                                text=text,
+                                title=title,
+                                status_code=200,
+                                strategy=FetchStrategy.BB_BROWSER,
+                                success=True,
+                                metadata={
+                                    'bb_browser': True,
+                                    'bb_method': 'open_and_read',
+                                    'platform': platform,
+                                },
+                            )
+                    except Exception:
+                        pass
             return FetchResult(
                 url=url,
                 strategy=FetchStrategy.BB_BROWSER,

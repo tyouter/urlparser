@@ -1,11 +1,11 @@
 """
 P3: 接口一致性测试
 
-验证 API / CLI / SKILL 三种接口对同一 URL 产生一致的结果。
+验证 API / CLI 两种接口对同一 URL 产生一致的结果。
 这是发现接口差异的关键测试层 - 之前发现的 CLI 截断问题就是这类测试要捕获的。
 
 核心检测标准:
-    1. 内容完整性: 三种接口输出的核心内容长度差异不超过阈值
+    1. 内容完整性: 两种接口输出的核心内容长度差异不超过阈值
     2. 结构一致性: Markdown 输出都包含必要的章节标题
     3. 元数据一致性: 标题、平台、策略等元数据一致
     4. 无截断: 任何接口的输出都不应包含截断标记 (...)
@@ -52,38 +52,6 @@ def _cli_parse(url: str, output_path: str) -> dict:
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "urlparser", "parse", url,
-             "--format", "markdown", "--output", output_path],
-            capture_output=True, timeout=180,
-            env={**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE",
-                 "HF_ENDPOINT": "https://hf-mirror.com"},
-        )
-        if proc.returncode == 0 and os.path.exists(output_path):
-            with open(output_path, encoding="utf-8") as f:
-                content = f.read()
-            return {
-                "success": True,
-                "markdown": content,
-                "content_length": len(content),
-                "error": None,
-            }
-        else:
-            stderr = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
-            return {"success": False, "error": stderr[:300], "content_length": 0}
-    except Exception as e:
-        return {"success": False, "error": str(e)[:300], "content_length": 0}
-
-
-def _skill_parse(url: str, output_path: str) -> dict:
-    skill_script = os.path.normpath(os.path.join(
-        os.path.dirname(__file__), "..", "..", "src",
-        "urlparser", "skill", "scripts", "parse.py"
-    ))
-    if not os.path.exists(skill_script):
-        pytest.skip("SKILL script not found")
-
-    try:
-        proc = subprocess.run(
-            [sys.executable, skill_script, url,
              "--format", "markdown", "--output", output_path],
             capture_output=True, timeout=180,
             env={**os.environ, "KMP_DUPLICATE_LIB_OK": "TRUE",
@@ -208,26 +176,6 @@ class TestInterfaceConsistency:
         assert "... (共" not in cli_body, "CLI output contains truncation marker"
         assert len(cli_body) >= MIN_CONTENT_LENGTH, \
             f"CLI content body too short ({len(cli_body)} chars), possible truncation"
-
-    @pytest.mark.asyncio
-    async def test_api_vs_skill_content_length(self, article_urls, tmp_path):
-        url = article_urls[1] if len(article_urls) > 1 else article_urls[0]
-        api_result = await _api_parse(url.url)
-        if not api_result["success"]:
-            pytest.skip(f"API parse failed")
-
-        skill_output = str(tmp_path / "skill_consistency.md")
-        skill_result = _skill_parse(url.url, skill_output)
-        if not skill_result["success"]:
-            pytest.skip(f"SKILL parse failed: {skill_result.get('error')}")
-
-        api_content_len = api_result["content_length"]
-        skill_content_len = skill_result["content_length"]
-
-        ratio = min(api_content_len, skill_content_len) / max(api_content_len, skill_content_len, 1)
-        assert ratio >= CONTENT_LENGTH_RATIO_THRESHOLD, \
-            f"Content length ratio {ratio:.2f} < {CONTENT_LENGTH_RATIO_THRESHOLD}: " \
-            f"API={api_content_len}, SKILL={skill_content_len}"
 
 
 class TestOutputEncoding:

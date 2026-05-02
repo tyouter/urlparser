@@ -130,6 +130,8 @@ class UrlParser:
         retry_attempts: List[RetryAttempt] = []
         start_total = time.time()
 
+        await self._ensure_cookies(platform)
+
         # --- Attempt 1: auto_select fetcher -> fallback parser ---
         attempt_start = time.time()
         try:
@@ -152,13 +154,20 @@ class UrlParser:
                     result.retry_attempts = retry_attempts
                     return result
 
-                reason = blocked or q_reason
-                retry_attempts.append(RetryAttempt(
-                    strategy=strategy_name,
-                    success=False,
-                    access_restriction_reason=reason,
-                    duration=elapsed,
-                ))
+                if blocked:
+                    retry_attempts.append(RetryAttempt(
+                        strategy=strategy_name,
+                        success=False,
+                        access_restriction_reason=blocked,
+                        duration=elapsed,
+                    ))
+                else:
+                    retry_attempts.append(RetryAttempt(
+                        strategy=strategy_name,
+                        success=False,
+                        error=q_reason,
+                        duration=elapsed,
+                    ))
             else:
                 retry_attempts.append(RetryAttempt(
                     strategy="playwright",
@@ -231,8 +240,8 @@ class UrlParser:
                     candidate.retry_attempts = retry_attempts
 
                     # Run transcription/comprehension if video
-                    if is_vid and config.transcribe.enabled and candidate.fetch_success:
-                        candidate.transcription = await self._transcribe_audio(url, config.transcribe)
+                    if is_vid and config.transcribe.enabled and candidate.fetch_success and not candidate.has_transcription:
+                        candidate.transcription = await self._transcribe_audio(url, config.transcribe, platform)
                     if is_vid and config.comprehension.enabled and candidate.fetch_success:
                         candidate.comprehension = await self._run_comprehension(
                             url, config.comprehension, candidate.transcription
@@ -246,13 +255,20 @@ class UrlParser:
                     candidate.retry_attempts = retry_attempts
                     return candidate
                 else:
-                    reason = blocked or q_reason
-                    retry_attempts.append(RetryAttempt(
-                        strategy=strategy_name,
-                        success=False,
-                        access_restriction_reason=reason,
-                        duration=elapsed,
-                    ))
+                    if blocked:
+                        retry_attempts.append(RetryAttempt(
+                            strategy=strategy_name,
+                            success=False,
+                            access_restriction_reason=blocked,
+                            duration=elapsed,
+                        ))
+                    else:
+                        retry_attempts.append(RetryAttempt(
+                            strategy=strategy_name,
+                            success=False,
+                            error=q_reason,
+                            duration=elapsed,
+                        ))
 
             except asyncio.TimeoutError:
                 elapsed = round(time.time() - attempt_start, 2)
@@ -275,6 +291,26 @@ class UrlParser:
         result.retry_attempts = retry_attempts
         if not result.final_strategy:
             result.final_strategy = "exhausted"
+
+        has_restriction = any(
+            a.access_restriction_reason for a in retry_attempts
+        )
+        if has_restriction:
+            login_ok = await self._try_interactive_login(platform)
+            if login_ok:
+                retry_with_cookies = await self._retry_with_saved_cookies(
+                    url, platform, platform_type, content_type, config
+                )
+                if retry_with_cookies and retry_with_cookies.fetch_success:
+                    retry_with_cookies.retry_attempts = retry_attempts + [
+                        RetryAttempt(strategy="interactive_login+cookie", success=True, duration=0)
+                    ]
+                    return retry_with_cookies
+
+            hint = self._build_login_hint(platform)
+            if hint:
+                result.error = (result.error or '') + '\n' + hint
+
         return result
 
     async def _strategy_playwright_extended(self, url: str, config: ParseConfig):
@@ -303,15 +339,28 @@ class UrlParser:
             return await fetcher.fetch(url)
 
     async def _strategy_cookie_fetcher(self, url: str, config: ParseConfig):
-        """Playwright with cookies."""
-        if not config.browser.cookies_file:
+        """Playwright with cookies (auto-extract from browser if needed)."""
+        cookies_file = config.browser.cookies_file
+
+        if not cookies_file:
+            from .cookies_manager import CookieManager
+            platform = detect_platform(url)
+            mgr = CookieManager()
+            cookies_path = mgr.get_cookies_path(platform)
+            if not mgr._is_valid(cookies_path):
+                mgr._refresh_from_browser(platform)
+            if cookies_path.exists():
+                cookies_file = str(cookies_path)
+
+        if not cookies_file:
             return None
+
         try:
             from .fetcher import CookieFetcher, FetchConfig
         except ImportError:
             return None
         fc = FetchConfig(
-            cookies_file=config.browser.cookies_file,
+            cookies_file=cookies_file,
             headless=config.browser.headless,
             compatibility_mode=config.browser.compatibility_mode,
             scroll_enabled=config.scroll.enabled,
@@ -414,8 +463,8 @@ class UrlParser:
                             platform, result.title, result.content
                         )
                         if not blocked:
-                            if is_vid and config.transcribe.enabled and result.fetch_success:
-                                result.transcription = await self._transcribe_audio(url, config.transcribe)
+                            if is_vid and config.transcribe.enabled and result.fetch_success and not result.has_transcription:
+                                result.transcription = await self._transcribe_audio(url, config.transcribe, platform)
                             if is_vid and config.comprehension.enabled and result.fetch_success:
                                 result.comprehension = await self._run_comprehension(
                                     url, config.comprehension, result.transcription
@@ -450,9 +499,18 @@ class UrlParser:
             result.platform_type = platform_type
             result.content_type = content_type
 
-            if is_vid and config.transcribe.enabled and result.fetch_success:
-                transcription = await self._transcribe_audio(url, config.transcribe)
-                result.transcription = transcription
+            if result.metadata.get('note_type') == 'video':
+                result.content_type = ContentType.VIDEO
+                is_vid = True
+
+            needs_transcription = (
+                is_vid
+                and config.transcribe.enabled
+                and result.fetch_success
+                and not result.has_transcription
+            )
+            if needs_transcription:
+                result.transcription = await self._transcribe_audio(url, config.transcribe, platform)
 
             if is_vid and config.comprehension.enabled and result.fetch_success:
                 comprehension = await self._run_comprehension(
@@ -465,13 +523,18 @@ class UrlParser:
         finally:
             await parser.close()
 
-    async def _transcribe_audio(self, url: str, transcribe_config) -> TranscriptionResult:
-        """音频转录 - 通过 ensure_transcribe_dependencies 保证依赖"""
+    async def _transcribe_audio(self, url: str, transcribe_config, platform: str = "") -> TranscriptionResult:
+        """音频转录 - B站优先走API直取音频流，其他走通用路径"""
         try:
             from .dependency_installer import ensure_transcribe_dependencies
 
             if not ensure_transcribe_dependencies(auto_install=True):
                 return TranscriptionResult(success=False, error="Transcription dependencies not available")
+
+            if platform == "bilibili":
+                bili_result = await self._transcribe_bilibili_via_api(url, transcribe_config)
+                if bili_result and bili_result.success:
+                    return bili_result
 
             if FunASRTranscriber.is_available():
                 engine = "funasr"
@@ -510,6 +573,147 @@ class UrlParser:
                 success=False,
                 error=str(e),
             )
+
+    async def _transcribe_bilibili_via_api(self, url: str, transcribe_config) -> TranscriptionResult:
+        """B站专用转录：通过API直取音频流，比yt-dlp更快更稳"""
+        import re as _re
+        import tempfile
+        import shutil
+        from pathlib import Path as _Path
+
+        try:
+            from .dependency_installer import ensure_transcribe_dependencies
+            if not ensure_transcribe_dependencies(auto_install=True):
+                return TranscriptionResult(success=False, error="Transcription dependencies not available")
+        except Exception:
+            return TranscriptionResult(success=False, error="Transcription dependencies not available")
+
+        bvid_match = _re.search(r'(BV[\w]+)', url)
+        if not bvid_match:
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://www.bilibili.com",
+                }) as client:
+                    resp = await client.head(url, timeout=10)
+                    bvid_match = _re.search(r'(BV[\w]+)', str(resp.url))
+            except Exception:
+                pass
+
+        if not bvid_match:
+            return TranscriptionResult(success=False, error="No BV ID found", engine="funasr")
+
+        bvid = bvid_match.group(1)
+
+        try:
+            import httpx
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+                "Referer": "https://www.bilibili.com",
+            }
+
+            async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+                resp = await client.get(f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}")
+                data = resp.json()
+
+                if data.get("code") != 0:
+                    return TranscriptionResult(success=False, error=f"API error: {data.get('message')}", engine="funasr")
+
+                v = data["data"]
+                cid = v.get("cid", 0)
+                duration = v.get("duration", 0)
+
+                if not cid or duration < 10:
+                    return TranscriptionResult(success=False, error="Video too short or no CID", engine="funasr")
+
+                resp2 = await client.get(
+                    f"https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}&qn=0&fnver=0&fnval=16&fourk=0"
+                )
+                data2 = resp2.json()
+
+                if data2.get("code") != 0:
+                    return TranscriptionResult(success=False, error=f"Playurl error: {data2.get('message')}", engine="funasr")
+
+                dash = data2.get("data", {}).get("dash", {})
+                audio_list = dash.get("audio", [])
+
+                if not audio_list:
+                    durl_list = data2.get("data", {}).get("durl", [])
+                    if durl_list:
+                        audio_url = durl_list[0].get("url", "")
+                    else:
+                        return TranscriptionResult(success=False, error="No audio stream", engine="funasr")
+                else:
+                    best_audio = max(audio_list, key=lambda x: x.get("bandwidth", 0))
+                    audio_url = best_audio.get("baseUrl") or best_audio.get("base_url") or best_audio.get("url", "")
+
+                    if not audio_url:
+                        backup_urls = best_audio.get("backupUrl", []) or best_audio.get("backup_url", [])
+                        if backup_urls:
+                            audio_url = backup_urls[0]
+
+                if not audio_url:
+                    return TranscriptionResult(success=False, error="No audio URL", engine="funasr")
+
+                if audio_url.startswith("//"):
+                    audio_url = "https:" + audio_url
+
+            temp_dir = tempfile.mkdtemp(prefix="bili_audio_")
+            try:
+                raw_audio = str(_Path(temp_dir) / "audio.m4s")
+                wav_audio = str(_Path(temp_dir) / "audio.wav")
+
+                download_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+                    "Referer": "https://www.bilibili.com",
+                }
+
+                async with httpx.AsyncClient(timeout=180, headers=download_headers, follow_redirects=True) as dl_client:
+                    async with dl_client.stream("GET", audio_url) as response:
+                        if response.status_code not in (200, 206):
+                            return TranscriptionResult(success=False, error=f"Audio download failed: HTTP {response.status_code}", engine="funasr")
+                        with open(raw_audio, "wb") as f:
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                f.write(chunk)
+
+                from .transcriber.base import convert_audio_for_funasr
+                if not convert_audio_for_funasr(raw_audio, wav_audio):
+                    return TranscriptionResult(success=False, error="Audio conversion failed", engine="funasr")
+
+                if FunASRTranscriber.is_available():
+                    transcriber = FunASRTranscriber(
+                        model_size=transcribe_config.model_size,
+                        device=transcribe_config.device,
+                    )
+                else:
+                    transcriber = WhisperTranscriber(
+                        model_size=transcribe_config.model_size,
+                        device=transcribe_config.device,
+                    )
+
+                loop = asyncio.get_event_loop()
+                t_result = await loop.run_in_executor(
+                    None,
+                    lambda: transcriber.transcribe(wav_audio, language=transcribe_config.language)
+                )
+
+                return TranscriptionResult(
+                    success=t_result.success,
+                    text=t_result.text,
+                    segments=t_result.segments,
+                    language=t_result.language or transcribe_config.language,
+                    duration=float(duration),
+                    engine=t_result.engine or "funasr",
+                    error=t_result.error,
+                )
+
+            finally:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        except Exception as e:
+            return TranscriptionResult(success=False, error=f"Bilibili API error: {str(e)[:200]}", engine="funasr")
 
     async def _run_comprehension(self, url, comp_config, transcription_result=None):
         """运行视频理解管线"""
@@ -567,6 +771,105 @@ class UrlParser:
             'generic': PlatformType.GENERIC,
         }
         return platform_map.get(platform, PlatformType.UNKNOWN)
+
+    _LOGIN_HINTS = {
+        'zhihu': (
+            '[提示] 知乎需要登录才能访问此内容。请尝试以下方法：\n'
+            '  1. 在浏览器中登录知乎，然后重新运行\n'
+            '  2. 运行: python -m urlparser.cookies_manager login zhihu\n'
+            '  3. 使用 --cookies 参数指定 cookie 文件'
+        ),
+        'xiaohongshu': (
+            '[提示] 小红书需要登录才能访问此内容。请尝试以下方法：\n'
+            '  1. 在浏览器中登录小红书，然后重新运行\n'
+            '  2. 运行: python -m urlparser.cookies_manager login xiaohongshu\n'
+            '  3. 使用 --cookies 参数指定 cookie 文件'
+        ),
+        'weixin': (
+            '[提示] 微信公众号文章可能需要特殊访问权限。请尝试：\n'
+            '  1. 使用 --cookies 参数指定 cookie 文件\n'
+            '  2. 运行: python -m urlparser.cookies_manager login weixin'
+        ),
+    }
+
+    _COOKIE_REQUIRED_PLATFORMS = {'zhihu', 'xiaohongshu', 'weixin'}
+
+    async def _ensure_cookies(self, platform: str):
+        import sys
+        if platform not in self._COOKIE_REQUIRED_PLATFORMS:
+            return
+        from .cookies_manager import CookieManager
+        mgr = CookieManager()
+        cookies_path = mgr.get_cookies_path(platform)
+        if mgr._is_valid(cookies_path):
+            return
+        if not sys.stdin.isatty():
+            return
+        refreshed = mgr._refresh_from_browser(platform)
+        if refreshed:
+            return
+        print(f"\n[Cookie 检查] 检测到 {platform} 无有效 cookie，正在打开浏览器登录...")
+        print("请在浏览器中完成登录，然后回到终端按 Enter 继续。")
+        try:
+            await mgr.interactive_login(platform)
+        except Exception:
+            pass
+
+    def _build_login_hint(self, platform: str) -> str:
+        return self._LOGIN_HINTS.get(platform, '')
+
+    async def _try_interactive_login(self, platform: str) -> bool:
+        from .cookies_manager import CookieManager, PLATFORM_DOMAINS
+        if platform not in PLATFORM_DOMAINS:
+            return False
+        mgr = CookieManager()
+        cookies_path = mgr.get_cookies_path(platform)
+        return mgr._is_valid(cookies_path)
+
+    async def _retry_with_saved_cookies(
+        self, url: str, platform: str,
+        platform_type: PlatformType, content_type: ContentType,
+        config: ParseConfig,
+    ) -> Optional[ParseResult]:
+        from .cookies_manager import CookieManager
+        mgr = CookieManager()
+        cookies_path = mgr.get_cookies_path(platform)
+        if not cookies_path.exists():
+            return None
+        try:
+            from .fetcher import CookieFetcher, FetchConfig
+        except ImportError:
+            return None
+        fc = FetchConfig(
+            cookies_file=str(cookies_path),
+            headless=config.browser.headless,
+            compatibility_mode=config.browser.compatibility_mode,
+            scroll_enabled=config.scroll.enabled,
+            max_scrolls=config.scroll.max_scrolls,
+            scroll_delay=config.scroll.scroll_delay,
+            load_full_content=config.load_full_content,
+            dismiss_popups=config.dismiss_popups,
+        )
+        try:
+            async with CookieFetcher(fc) as fetcher:
+                fetch_result = await fetcher.fetch(url)
+            if not fetch_result or not fetch_result.success:
+                return None
+            candidate = self._fetch_result_to_parse_result(
+                fetch_result, url, platform, platform_type, content_type
+            )
+            blocked = ContentQualityMixin.detect_access_restriction(
+                platform, candidate.title, candidate.content
+            )
+            quality_ok, _ = ContentQualityMixin.validate_quality(
+                candidate.title, candidate.content,
+                min_length=config.retry.min_quality_length,
+            )
+            if not blocked and quality_ok:
+                return candidate
+        except Exception:
+            pass
+        return None
 
     async def parse_batch(
         self,

@@ -1,0 +1,156 @@
+{
+  "timestamp": "2026-04-30T18:46:26.806621",
+  "duration": 85.9729413986206,
+  "dataset_total": 501,
+  "dataset_platforms": {
+    "bilibili": 229,
+    "zhihu": 121,
+    "weixin": 17,
+    "xiaohongshu": 6,
+    "generic": 70,
+    "sspai": 5,
+    "dribbble": 11,
+    "youtube": 24,
+    "github": 17,
+    "x_twitter": 1
+  },
+  "acceptance": {
+    "total_urls": 10,
+    "total_passed": 6,
+    "overall_success_rate": 0.6,
+    "platforms_tested": 3,
+    "platforms_required": 10,
+    "min_platform_rate": 0.5,
+    "worst_platform": "bilibili"
+  },
+  "benchmark": {
+    "non_video_ppm": 2.5179298197844613,
+    "overall_ppm": 4.49208252601288,
+    "target_ppm": 10.0,
+    "platform_benchmarks": {
+      "bilibili": {
+        "platform": "bilibili",
+        "is_video_platform": true,
+        "successful": 6,
+        "parses_per_minute": 9.411287137644976,
+        "avg_parse_time": 6.375323494275411,
+        "video_efficiency_rate": 0.8333333333333334
+      },
+      "zhihu": {
+        "platform": "zhihu",
+        "is_video_platform": false,
+        "successful": 3,
+        "parses_per_minute": 2.162700490158534,
+        "avg_parse_time": 27.743092616399128,
+        "video_efficiency_rate": 1.0
+      },
+      "weixin": {
+        "platform": "weixin",
+        "is_video_platform": false,
+        "successful": 1,
+        "parses_per_minute": 4.963961713357906,
+        "avg_parse_time": 12.087119817733765,
+        "video_efficiency_rate": 1.0
+      }
+    }
+  },
+  "acceptance_pass": false,
+  "benchmark_pass": false,
+  "overall_pass": false,
+  "failures": [
+    {
+      "rule": "dataset_size",
+      "expected": ">= 500",
+      "actual": "10",
+      "severity": "CRITICAL"
+    },
+    {
+      "rule": "overall_success_rate",
+      "expected": ">= 99%",
+      "actual": "60.00%",
+      "severity": "CRITICAL"
+    },
+    {
+      "rule": "platform_coverage",
+      "expected": "All: ['bilibili', 'dribbble', 'generic', 'github', 'sspai', 'weixin', 'x_twitter', 'xiaohongshu', 'youtube', 'zhihu']",
+      "actual": "Missing: ['dribbble', 'generic', 'github', 'sspai', 'x_twitter', 'xiaohongshu', 'youtube']",
+      "severity": "CRITICAL"
+    },
+    {
+      "rule": "platform_acceptance_rate",
+      "platform": "bilibili",
+      "expected": ">= 99%",
+      "actual": "50.00%",
+      "severity": "HIGH"
+    },
+    {
+      "rule": "platform_acceptance_rate",
+      "platform": "zhihu",
+      "expected": ">= 99%",
+      "actual": "66.67%",
+      "severity": "HIGH"
+    },
+    {
+      "rule": "non_video_throughput",
+      "expected": ">= 10 parses/min",
+      "actual": "2.5 parses/min",
+      "severity": "HIGH"
+    },
+    {
+      "rule": "video_efficiency",
+      "platform": "bilibili",
+      "expected": ">= 95% within 10% of duration",
+      "actual": "83%",
+      "severity": "MEDIUM"
+    },
+    {
+      "rule": "platform_throughput",
+      "platform": "zhihu",
+      "expected": ">= 10 parses/min",
+      "actual": "2.2 parses/min",
+      "severity": "MEDIUM"
+    },
+    {
+      "rule": "platform_throughput",
+      "platform": "weixin",
+      "expected": ">= 10 parses/min",
+      "actual": "5.0 parses/min",
+      "severity": "MEDIUM"
+    }
+  ],
+  "platform_details": [
+    {
+      "platform": "bilibili",
+      "total": 6,
+      "passed": 3,
+      "acceptance_rate": 0.5,
+      "avg_parse_time": 6.373333333333334,
+      "no_title": 0,
+      "no_content": 2,
+      "content_too_short": 3,
+      "parse_errors": 0
+    },
+    {
+      "platform": "weixin",
+      "total": 1,
+      "passed": 1,
+      "acceptance_rate": 1.0,
+      "avg_parse_time": 12.09,
+      "no_title": 0,
+      "no_content": 0,
+      "content_too_short": 0,
+      "parse_errors": 0
+    },
+    {
+      "platform": "zhihu",
+      "total": 3,
+      "passed": 2,
+      "acceptance_rate": 0.6666666666666666,
+      "avg_parse_time": 27.743333333333336,
+      "no_title": 1,
+      "no_content": 0,
+      "content_too_short": 0,
+      "parse_errors": 0
+    }
+  ]
+}

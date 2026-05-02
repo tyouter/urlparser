@@ -98,3 +98,16 @@ tests/framework/snapshots/
 tests/framework/regression_reports/
 tests/test_final.py
 tests/ES9*/
+
+# output
+output/
+
+# cookies
+cookies/
+
+# models
+models/
+
+
+# claude
+.claude/settings.local.json

@@ -78,7 +78,7 @@ class FetcherFactory:
 
         优先级:
         1. bb-browser (已安装的浏览器自动化工具)
-        2. Cookie (有 cookies_file)
+        2. Cookie (有 cookies_file 或自动提取成功)
         3. UserChrome (有 user_data_dir)
         4. Playwright (默认)
 
@@ -98,7 +98,38 @@ class FetcherFactory:
         if config.cookies_file:
             return CookieFetcher(config)
 
+        cookies_file = cls._try_auto_cookies(url)
+        if cookies_file:
+            config = FetchConfig(
+                timeout=config.timeout,
+                headless=config.headless,
+                compatibility_mode=config.compatibility_mode,
+                scroll_enabled=config.scroll_enabled,
+                max_scrolls=config.max_scrolls,
+                scroll_delay=config.scroll_delay,
+                load_full_content=config.load_full_content,
+                dismiss_popups=config.dismiss_popups,
+                cookies_file=cookies_file,
+            )
+            return CookieFetcher(config)
+
         if config.user_data_dir:
             return UserChromeFetcher(config)
 
         return PlaywrightFetcher(config)
+
+    @classmethod
+    def _try_auto_cookies(cls, url: str) -> Optional[str]:
+        try:
+            from ..cookies_manager import CookieManager
+            from ..utils import detect_platform
+            platform = detect_platform(url)
+            mgr = CookieManager()
+            cookies_path = mgr.get_cookies_path(platform)
+            if not mgr._is_valid(cookies_path):
+                mgr._refresh_from_browser(platform)
+            if cookies_path.exists():
+                return str(cookies_path)
+        except Exception:
+            pass
+        return None
