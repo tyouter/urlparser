@@ -1,6 +1,11 @@
 ---
 name: urlparser
 description: Parse any URL to extract content, transcribe video/audio, and convert websites to structured data. Use when the user asks to parse, extract, read, or transcribe any URL, link, video, or webpage.
+license: MIT
+metadata:
+  version: "3.3.0"
+  author: "KnowHow Team"
+  repository: "https://github.com/tyouter/urlparser"
 ---
 
 # urlparser
