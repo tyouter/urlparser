@@ -64,6 +64,9 @@ packages = ["src/urlparser"]
 [tool.hatch.build]
 include = [
     "src/urlparser/**/*.py",
+    "skills/**/*.md",
+    ".claude/skills/**/*.md",
+    ".trae/skills/**/*.md",
 ]
 
 [tool.pytest.ini_options]

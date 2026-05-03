@@ -48,13 +48,15 @@ pip install browser-use
 
 urlparser 可作为 **AI 编码助手的 Skill** 直接使用，无需手动调用 CLI 或 Python API。当你在对话中提到解析 URL 时，Skill 会自动触发。
 
-| IDE / 助手 | Skill 路径 | 自动识别 |
+| IDE / 助手 | Skill 路径 | 安装方式 |
 |-----------|-----------|---------|
-| **Claude Code** | `.claude/skills/urlparser/SKILL.md` | ✅ 自动加载 |
-| **Trae** | `.trae/skills/urlparser/SKILL.md` | ✅ 自动加载 |
-| **Hermes** | `.agents/skills/urlparser/SKILL.md` | ✅ 自动加载 |
+| **Claude Code** | `.claude/skills/urlparser/SKILL.md` | 克隆仓库，自动加载 |
+| **Trae** | `.trae/skills/urlparser/SKILL.md` | 克隆仓库，自动加载 |
+| **Hermes** | `skills/urlparser/SKILL.md` | `hermes skills install tyouter/urlparser` |
 
 **安装方式**
+
+**Claude Code / Trae**：克隆仓库后自动识别对应目录下的 SKILL.md
 
 ```bash
 git clone https://github.com/tyouter/urlparser.git
@@ -62,7 +64,11 @@ cd urlparser
 pip install -e .
 ```
 
-克隆后各 IDE 会自动识别对应目录下的 SKILL.md，无需额外配置。
+**Hermes**：一条命令安装
+
+```bash
+hermes skills install tyouter/urlparser
+```
 
 **使用示例**
 

@@ -1,16 +1,29 @@
 ---
 name: urlparser
 description: Parse any URL to extract content, transcribe video/audio, and convert websites to structured data. Use when the user asks to parse, extract, read, or transcribe any URL, link, video, or webpage.
+version: "3.3.0"
 license: MIT
+platforms: [macos, linux, windows]
 metadata:
   version: "3.3.0"
   author: "KnowHow Team"
   repository: "https://github.com/tyouter/urlparser"
+  hermes:
+    tags: [url, parser, content-extractor, transcriber, web-scraping]
+    category: productivity
+    requires_toolsets: [terminal]
 ---
 
 # urlparser
 
 Universal URL parser that auto-detects platform and extracts structured content.
+
+## When to Use
+
+- User asks to parse, read, extract, or transcribe content from a URL
+- User shares a link and wants the content summarized or extracted
+- User wants video/audio transcription from Bilibili, YouTube, etc.
+- User needs structured data from web pages (articles, videos, repositories)
 
 ## Prerequisites
 
@@ -30,7 +43,7 @@ Optional tools (auto-installed on first use if missing):
 - bb-browser: `npm install -g bb-browser` (for login-state browsing with structured data)
 - ffmpeg: for audio/video processing
 
-## Usage
+## Procedure
 
 ### Parse a URL (extract title, content, author)
 ```bash
@@ -360,11 +373,18 @@ These are documented defects that violate the Quality Rules above:
 | Video `content` = description only | content should be a meaningful summary | BY DESIGN — no AI summarization yet |
 | `author` field contains biography text | author must be a clean name | OPEN — no text cleaning on author field |
 
-## Notes
+## Pitfalls
 
-- Transcription uses FunASR (primary) or Whisper (fallback), auto-installed on first use
-- Content is cached locally, re-parsing is fast
-- Use --no-cache to force refresh
-- Use --cookies <file> for authenticated access
 - Xiaohongshu requires cookies for API access; use CookieManager.interactive_login()
 - Cookie priority platforms (zhihu, xiaohongshu, weixin) always use CookieFetcher first when cookies are available
+- Transcription uses FunASR (primary) or Whisper (fallback), auto-installed on first use
+- Content is cached locally; use --no-cache to force refresh
+
+## Verification
+
+After parsing, confirm:
+1. `fetch_success` is `true`
+2. `title` is non-empty
+3. `content` length ≥ 50 characters
+4. For video: `video_metadata.duration` is non-empty
+5. For articles: no access restriction indicators in content
