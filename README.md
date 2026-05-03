@@ -13,8 +13,8 @@
 - **视频转录** — FunASR（中文优化）/ Whisper（99 语言）
 - **双层缓存** — 内存 + 磁盘，避免重复解析
 - **批量处理** — 并发解析，进度追踪
+- **SKILL 集成** — Claude Code / Trae / Hermes 开箱即用，自然语言触发
 - **CLI + Python API** — 灵活使用方式
-- **Claude Code Skill** — 开箱即用，自然语言触发，自动识别解析意图
 
 ## 安装
 
@@ -43,6 +43,63 @@ pip install browser-use
 ```
 
 ## 快速开始
+
+### SKILL 模式（推荐）
+
+urlparser 可作为 **AI 编码助手的 Skill** 直接使用，无需手动调用 CLI 或 Python API。当你在对话中提到解析 URL 时，Skill 会自动触发。
+
+| IDE / 助手 | Skill 路径 | 自动识别 |
+|-----------|-----------|---------|
+| **Claude Code** | `.claude/skills/urlparser/SKILL.md` | ✅ 自动加载 |
+| **Trae** | `.trae/skills/urlparser/SKILL.md` | ✅ 自动加载 |
+| **Hermes** | `.agents/skills/urlparser/SKILL.md` | ✅ 自动加载 |
+
+**安装方式**
+
+```bash
+git clone https://github.com/tyouter/urlparser.git
+cd urlparser
+pip install -e .
+```
+
+克隆后各 IDE 会自动识别对应目录下的 SKILL.md，无需额外配置。
+
+**使用示例**
+
+在任意支持的 IDE 中直接对话即可：
+
+```
+用户: 帮我解析这个知乎链接 https://www.zhihu.com/question/19550225
+助手: [自动触发 urlparser Skill，调用 CLI 解析并返回结构化内容]
+
+用户: 把这个B站视频转录一下 https://www.bilibili.com/video/BV1KBZkB6EJF
+助手: [自动触发，带 --transcribe 参数解析]
+
+用户: 批量解析这个文件里的所有URL urls.txt
+助手: [自动触发 parse-batch 命令]
+```
+
+**支持的触发方式**
+
+| 用户意图 | Skill 行为 |
+|---------|-----------|
+| 解析/读取/提取 URL 内容 | `urlparser parse <url>` |
+| 转录视频/音频 | `urlparser parse <url> --transcribe` |
+| 视频理解（视觉+音频） | `urlparser parse <url> --comprehension audio_video` |
+| 批量解析 | `urlparser parse-batch <file>` |
+| 转录本地文件 | `urlparser transcribe <file>` |
+| 视频元信息 | `urlparser video-info <url>` |
+
+**Cookie 管理**
+
+首次解析需要登录的平台（知乎、小红书、微信）时，urlparser 会自动检测 Cookie 状态，若缺失则提示交互式登录：
+
+```bash
+# 手动管理 Cookie
+python -c "from urlparser.cookies_manager import CookieManager; import asyncio; asyncio.run(CookieManager().interactive_login('zhihu'))"
+```
+
+登录一次后 Cookie 会持久化保存，后续解析无需重复登录。
 
 ### Python API
 
@@ -236,67 +293,6 @@ result = await transcriber.transcribe("audio.mp3")
 transcriber = WhisperTranscriber(model_size="large")
 result = await transcriber.transcribe("audio.mp3", language="en")
 ```
-
-## Claude Code 集成
-
-urlparser 可作为 **Claude Code Skill** 直接使用，无需手动调用 CLI 或 Python API。当你在 Claude Code 中提到解析 URL 时，Skill 会自动触发。
-
-### 安装方式
-
-**方式一：克隆仓库（推荐）**
-
-```bash
-git clone https://github.com/tyouter/urlparser.git
-cd urlparser
-pip install -e .
-```
-
-Claude Code 会自动识别项目根目录下的 `.claude/skills/urlparser/SKILL.md`，无需额外配置。
-
-**方式二：pip 安装 + 手动配置 Skill**
-
-```bash
-pip install urlparser
-```
-
-然后在你的项目 `.claude/skills/` 目录下创建 Skill 文件，内容参考 [SKILL.md](.claude/skills/urlparser/SKILL.md)。
-
-### 使用示例
-
-在 Claude Code 中直接对话即可：
-
-```
-用户: 帮我解析这个知乎链接 https://www.zhihu.com/question/19550225
-Claude: [自动触发 urlparser Skill，调用 CLI 解析并返回结构化内容]
-
-用户: 把这个B站视频转录一下 https://www.bilibili.com/video/BV1KBZkB6EJF
-Claude: [自动触发，带 --transcribe 参数解析]
-
-用户: 批量解析这个文件里的所有URL urls.txt
-Claude: [自动触发 parse-batch 命令]
-```
-
-### 支持的触发方式
-
-| 用户意图 | Skill 行为 |
-|---------|-----------|
-| 解析/读取/提取 URL 内容 | `urlparser parse <url>` |
-| 转录视频/音频 | `urlparser parse <url> --transcribe` |
-| 视频理解（视觉+音频） | `urlparser parse <url> --comprehension audio_video` |
-| 批量解析 | `urlparser parse-batch <file>` |
-| 转录本地文件 | `urlparser transcribe <file>` |
-| 视频元信息 | `urlparser video-info <url>` |
-
-### Cookie 管理
-
-首次解析需要登录的平台（知乎、小红书、微信）时，urlparser 会自动检测 Cookie 状态，若缺失则提示交互式登录：
-
-```bash
-# 手动管理 Cookie
-python -c "from urlparser.cookies_manager import CookieManager; import asyncio; asyncio.run(CookieManager().interactive_login('zhihu'))"
-```
-
-登录一次后 Cookie 会持久化保存，后续解析无需重复登录。
 
 ## API 导出
 
