@@ -1,6 +1,6 @@
 ---
 name: urlparser
-description: "Parse any URL to extract content, transcribe video/audio, and convert websites to structured data. Invoke when user asks to parse, extract, read, or transcribe any URL, link, video, or webpage."
+description: Parse any URL to extract content, transcribe video/audio, and convert websites to structured data. Use when the user asks to parse, extract, read, or transcribe any URL, link, video, or webpage.
 license: MIT
 metadata:
   version: "3.3.0"
@@ -319,6 +319,9 @@ These rules define the minimum acceptable quality for parse output. If any rule 
 | `video_metadata.duration` | MUST be non-empty for video content | Duration is the most basic video attribute |
 | `transcription.success` | MUST be `true` when subtitles are available | Available subtitles MUST be extracted |
 | `transcription.text` | MUST be non-empty when `transcription.success=true` | Successful transcription with empty text is a bug |
+| `transcription.segments[].start` | MUST be > 0 for at least some segments | All-zero timestamps indicate unpopulated segment data |
+| `transcription.segments[].end` | MUST be > start for each segment | End time must be after start time |
+| `transcription.segments[].text` | MUST be non-empty for each segment | Empty segment text is meaningless |
 
 #### Article-specific (content_type=article)
 
@@ -327,12 +330,35 @@ These rules define the minimum acceptable quality for parse output. If any rule 
 | `content` length | MUST be ≥ 200 for articles | Articles should have substantial content |
 | `content` quality | MUST NOT contain access restriction indicators | "登录/注册", "没有知识存在的荒原" etc. indicate blocked content |
 
+#### GitHub-specific (content_type=repository)
+
+| Rule | Requirement | Rationale |
+|------|-------------|-----------|
+| `content` | MUST contain README content | README is the primary content of a repository page |
+
 ### Output Method Contract
 
 All interfaces MUST use the standard output methods:
 
 - **Markdown**: `result.to_markdown()` — do NOT hand-craft Markdown
 - **JSON**: `json.dumps(result.to_dict(), ensure_ascii=False, indent=2)` — do NOT hand-craft JSON
+
+This ensures:
+1. All output fields are present and consistent across API/CLI
+2. Format changes in `models.py` automatically propagate to all interfaces
+3. No fields are accidentally omitted
+
+### Known Defects (as of v3.3.0)
+
+These are documented defects that violate the Quality Rules above:
+
+| Defect | Rule Violated | Status |
+|--------|--------------|--------|
+| `_extract_subtitles()` returns empty `entries` → transcription text is empty | transcription.text must be non-empty | OPEN — subtitle content download not implemented |
+| Timestamps all zero `[00:00:00 - 00:00:00]` | segments[].start must be > 0 | OPEN — depends on subtitle content download |
+| `platform` shows "default" instead of "generic" | platform must not be "default" | OPEN — platform_map mapping issue |
+| Video `content` = description only | content should be a meaningful summary | BY DESIGN — no AI summarization yet |
+| `author` field contains biography text | author must be a clean name | OPEN — no text cleaning on author field |
 
 ## Notes
 

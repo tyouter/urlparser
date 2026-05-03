@@ -17,57 +17,81 @@ Universal URL parser that auto-detects platform and extracts structured content.
 This skill requires the urlparser CLI tool.
 
 Check if already installed:
+```bash
 urlparser --version
+```
 
 If not installed, install from this repository:
+```bash
 pip install -e .
+```
 
 Optional tools (auto-installed on first use if missing):
-- bb-browser: npm install -g bb-browser (for login-state browsing with structured data)
+- bb-browser: `npm install -g bb-browser` (for login-state browsing with structured data)
 - ffmpeg: for audio/video processing
 
 ## Usage
 
 ### Parse a URL (extract title, content, author)
+```bash
 urlparser parse <url>
+```
 
 ### Parse with video transcription
+```bash
 urlparser parse <url> --transcribe
+```
 
 ### Parse with video understanding (visual + audio)
+```bash
 urlparser parse <url> --comprehension audio_video
+```
 
 ### Online parse (LLM API, no browser/yt-dlp needed)
+```bash
 urlparser parse <url> --parse-mode online
+```
 
 ### Batch parse URLs from a file
+```bash
 urlparser parse-batch <file>
+```
 
 ### Transcribe a local audio/video file
+```bash
 urlparser transcribe <file>
+```
 
 ### Batch transcribe a folder
+```bash
 urlparser transcribe-folder <directory>
+```
 
 ### Get video metadata
+```bash
 urlparser video-info <url>
+```
 
 ### Cookie management (interactive login)
+```bash
 python -c "from urlparser.cookies_manager import CookieManager; import asyncio; asyncio.run(CookieManager().interactive_login('xiaohongshu'))"
+```
 
 ### Python API
+```python
 from urlparser import parse, ParseConfig
 
 result = await parse(url)
 result = await parse(url, config=ParseConfig.with_transcribe())
 result = await parse(url, config=ParseConfig.with_online_parse())
+```
 
 ## Supported Platforms
 
 | Platform | Content Type | Features |
 |----------|-------------|----------|
 | Bilibili | Video | Transcription (API direct audio), metadata, subtitles |
-| Zhihu | Article/Answer | Full text extraction, forced non-headless |
+| Zhihu | Article/Answer | Full text extraction, cookie-based authenticated access |
 | WeChat | Article | Full text extraction, image placeholder |
 | Xiaohongshu | Post/Video | API signature + Playwright fallback, video note detection |
 | YouTube | Video | Transcription (yt-dlp), multi-language subtitles |
@@ -88,6 +112,7 @@ parse(url) → UrlParser.parse()
   │              (API签名 → homefeed搜索token → Playwright降级)
   │
   ├─ [其他平台] → FetcherFactory.auto_select(url, config)
+  │   │           ├─ cookie优先平台(zhihu/xiaohongshu/weixin) → CookieFetcher
   │   │           ├─ bb-browser 可用 → BbBrowserFetcher (结构化数据)
   │   │           ├─ 有 cookies_file → CookieFetcher
   │   │           ├─ 有 user_data_dir → UserChromeFetcher
@@ -113,7 +138,8 @@ parse(url) → UrlParser.parse()
 
 - **Transcription is orchestrated by `core.py` only**: VideoParser extracts metadata + subtitles, NEVER transcribes. This avoids duplicate transcription and field loss.
 - **Subtitle → TranscriptionResult mapping**: When subtitles exist, `create_result_from_parser()` maps them to `TranscriptionResult(engine="subtitle")` automatically.
-- **Strategy auto-fallback**: Fetcher tries bb-browser → Cookie → UserChrome → Playwright. On failure or access restriction, it automatically switches.
+- **Strategy auto-fallback**: Fetcher tries strategies in priority order. On failure or access restriction, it automatically switches.
+- **Cookie priority for login-required platforms**: zhihu, xiaohongshu, weixin always use CookieFetcher first when cookies are available, even if bb-browser is installed.
 - **Content-level video detection**: Some platforms (e.g. Xiaohongshu) cannot distinguish video/image from URL alone. After parsing, `metadata.note_type=="video"` triggers transcription dynamically.
 - **Retry mechanism**: When `config.retry.enabled=True`, failed parses try up to 5 strategies with access restriction detection + quality validation at each step.
 
@@ -149,12 +175,21 @@ Both interfaces (Python API, CLI) MUST produce identical output by using the sam
 
 The tool automatically selects the best fetch strategy:
 
-1. bb-browser (CDP) - reuses user's logged-in browser session, provides structured data
-2. Cookie-based - uses exported cookies for authenticated access
-3. User Chrome - uses user's Chrome profile directory
-4. Playwright - headless browser with compatibility mode (default)
+1. **Cookie-based** (for zhihu/xiaohongshu/weixin) — uses exported cookies for authenticated access, prioritized over bb-browser
+2. **bb-browser** (CDP) — reuses user's logged-in browser session, provides structured data
+3. **User Chrome** — uses user's Chrome profile directory
+4. **Playwright** — headless browser with compatibility mode (default fallback)
 
 No configuration needed. The tool retries with fallback strategies when content quality is insufficient.
+
+## Cookie Management
+
+For platforms requiring login (zhihu, xiaohongshu, weixin):
+
+- **Auto-detection**: Before parsing, `_ensure_cookies()` checks if valid cookies exist
+- **Auto-extraction**: Attempts to extract cookies from the user's browser via `browser_cookie3`
+- **Interactive login**: If no valid cookies found, prompts user to log in via browser
+- **Persistence**: Cookies are saved to `cookies/<platform>_cookies.json` and reused across sessions
 
 ## Transcription Architecture
 
@@ -206,7 +241,6 @@ The canonical Markdown structure produced by `result.to_markdown()`:
 
 ## 视频理解          ← only when has_comprehension=true
 {comprehension output}
-
 ```
 
 ### JSON Output (`--format json`)
@@ -333,3 +367,4 @@ These are documented defects that violate the Quality Rules above:
 - Use --no-cache to force refresh
 - Use --cookies <file> for authenticated access
 - Xiaohongshu requires cookies for API access; use CookieManager.interactive_login()
+- Cookie priority platforms (zhihu, xiaohongshu, weixin) always use CookieFetcher first when cookies are available
