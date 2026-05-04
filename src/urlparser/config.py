@@ -10,6 +10,18 @@ from pathlib import Path
 
 
 @dataclass
+class ImageDownloadConfig:
+    """图片下载配置"""
+    enabled: bool = False
+    mode: str = "local"  # "local" | "base64"
+    image_dir: Optional[str] = None  # 图片保存目录
+    image_prefix: str = "images/"  # Markdown 中图片路径的前缀
+    max_size: int = 10  # 最大图片大小(MB)
+    timeout: int = 30  # 下载超时(秒)
+    user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+
+@dataclass
 class BrowserConfig:
     """浏览器配置"""
     use_user_chrome: bool = False
@@ -77,6 +89,7 @@ class ParseConfig:
     scroll: ScrollConfig = field(default_factory=ScrollConfig)
     transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
     comprehension: ComprehensionConfig = field(default_factory=ComprehensionConfig)
+    image_download: ImageDownloadConfig = field(default_factory=ImageDownloadConfig)
     retry: RetryConfig = field(default_factory=RetryConfig)
 
     load_full_content: bool = True
@@ -110,6 +123,12 @@ class ParseConfig:
         """启用视频理解"""
         comprehension = ComprehensionConfig(enabled=True, mode=mode, engine=engine)
         return cls(comprehension=comprehension, **kwargs)
+
+    @classmethod
+    def with_image_download(cls, mode: str = "local", image_dir: Optional[str] = None, **kwargs):
+        """启用图片下载"""
+        image_download = ImageDownloadConfig(enabled=True, mode=mode, image_dir=image_dir)
+        return cls(image_download=image_download, **kwargs)
 
     @classmethod
     def full_feature(cls, **kwargs):
@@ -171,6 +190,7 @@ __all__ = [
     'ScrollConfig',
     'TranscribeConfig',
     'ComprehensionConfig',
+    'ImageDownloadConfig',
     'RetryConfig',
     'ParseConfig',
     'BatchTranscribeConfig',

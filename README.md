@@ -9,6 +9,7 @@
 
 - **自动平台识别** — 支持知乎、B站、YouTube、微信、小红书、GitHub 等
 - **智能内容提取** — 标题、作者、正文、视频元数据
+- **图片下载支持** — 下载网页中的图片到本地，或转换为 Base64 嵌入
 - **自适应浏览器内容访问** — 兼容模式、Cookie 认证、用户浏览器、AI 自动化
 - **视频转录** — FunASR（中文优化）/ Whisper（99 语言）
 - **双层缓存** — 内存 + 磁盘，避免重复解析
@@ -32,6 +33,9 @@ playwright install chromium
 ### 可选依赖
 
 ```bash
+# 图片下载
+pip install pillow requests
+
 # 视频信息提取
 pip install yt-dlp ffmpeg
 
@@ -111,7 +115,7 @@ python -c "from urlparser.cookies_manager import CookieManager; import asyncio; 
 
 ```python
 import asyncio
-from urlparser import parse, ParseConfig
+from urlparser import parse, ParseConfig, ImageDownloader, ImageDownloadConfig
 
 async def main():
     # 简单解析
@@ -125,6 +129,23 @@ async def main():
         enable_transcribe=True
     )
     print(result.transcription.text)
+    
+    # 下载图片
+    config = ParseConfig.with_image_download(
+        mode="local",  # 或 "base64"
+        image_dir="./article_images"
+    )
+    result = await parse(url, config=config)
+    
+    # 也可以先生成 Markdown，然后手动处理图片
+    markdown = result.to_markdown()
+    downloader = ImageDownloader(ImageDownloadConfig(enabled=True))
+    processed_markdown, image_info = downloader.process_markdown(
+        markdown, 
+        output_dir="./article",
+        base_url=url
+    )
+    downloader.cleanup()
 
 asyncio.run(main())
 ```
@@ -140,6 +161,15 @@ urlparser parse <url> --output result.md
 
 # 启用转录
 urlparser parse <url> --transcribe
+
+# 下载图片到本地（配合 --output 使用会自动将图片保存在输出文件同目录下）
+urlparser parse <url> --download-images --output article.md
+
+# 图片模式：local（默认，下载到本地）或 base64（嵌入 Markdown）
+urlparser parse <url> --download-images --image-mode base64
+
+# 自定义图片保存目录
+urlparser parse <url> --download-images --image-dir ./article_images
 
 # 批量解析
 urlparser parse-batch urls.txt --output-dir ./results
@@ -306,11 +336,14 @@ result = await transcriber.transcribe("audio.mp3", language="en")
 from urlparser import (
     # 核心 API
     parse, parse_batch, parse_sync, UrlParser,
-    ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig,
+    ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ImageDownloadConfig,
 
     # 数据模型
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult,
+
+    # 图片下载
+    ImageDownloader,
 
     # 存储层
     ResultCache, ResultStorage, StateManager, SourceDocumentManager,

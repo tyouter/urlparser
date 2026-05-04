@@ -109,6 +109,12 @@ DEPENDENCIES = {
         pip_name="browser-use",
         description="智能浏览器操作",
     ),
+    "requests": Dependency(
+        name="requests",
+        type=DependencyType.PYTHON_PACKAGE,
+        pip_name="requests",
+        description="HTTP 请求库",
+    ),
 }
 
 
@@ -509,6 +515,39 @@ def ensure_comprehension_dependencies(auto_install: bool = True) -> bool:
             logger.warning("  - Pillow 缺失")
         if not has_engine:
             logger.warning("  - 推理引擎缺失 (openvino 或 llama-cpp-python)")
+
+    return all_ok
+
+
+def ensure_image_dependencies(auto_install: bool = True) -> bool:
+    """
+    确保图片下载依赖已安装
+
+    Args:
+        auto_install: 是否自动安装
+
+    Returns:
+        是否所有必要依赖都已安装
+    """
+    logger.info("\n检查图片下载依赖...")
+
+    deps = ["requests", "PIL"]
+    results = {}
+
+    for name in deps:
+        installed, version = ensure_dependency(name, auto_install)
+        results[name] = installed
+
+    all_ok = results.get("requests", False) and results.get("PIL", False)
+
+    if all_ok:
+        logger.info("图片下载依赖检查完成，功能可用")
+    else:
+        logger.warning("图片下载依赖检查完成，部分依赖缺失")
+        if not results.get("requests", False):
+            logger.warning("  - requests 缺失")
+        if not results.get("PIL", False):
+            logger.warning("  - Pillow 缺失")
 
     return all_ok
 

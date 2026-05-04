@@ -88,6 +88,10 @@ def _add_parse_parser(subparsers):
     p.add_argument('--comp-engine', default='auto',
                    choices=['auto', 'openvino', 'llamacpp'], help='VLM 引擎')
     p.add_argument('--comp-max-frames', type=int, default=50, help='最大分析帧数')
+    # 图片下载选项
+    p.add_argument('--download-images', '-d', action='store_true', help='下载图片到本地')
+    p.add_argument('--image-mode', default='local', choices=['local', 'base64'], help='图片保存方式：local=本地文件, base64=内嵌到Markdown')
+    p.add_argument('--image-dir', help='图片保存目录（默认：./images）')
 
 
 def _add_parse_batch_parser(subparsers):
@@ -206,7 +210,7 @@ def _add_install_deps_parser(subparsers):
 
 async def cmd_parse(args):
     from .core import UrlParser
-    from .config import ParseConfig, TranscribeConfig, BrowserConfig, ComprehensionConfig
+    from .config import ParseConfig, TranscribeConfig, BrowserConfig, ComprehensionConfig, ImageDownloadConfig
 
     comp_config = None
     if args.comprehension:
@@ -216,6 +220,14 @@ async def cmd_parse(args):
             mode=mode_map.get(args.comprehension, 'audio_video'),
             engine=args.comp_engine,
             max_frames=args.comp_max_frames,
+        )
+
+    img_config = None
+    if args.download_images:
+        img_config = ImageDownloadConfig(
+            enabled=True,
+            mode=args.image_mode,
+            image_dir=args.image_dir,
         )
 
     config = ParseConfig(
@@ -231,12 +243,31 @@ async def cmd_parse(args):
         ),
         parse_mode=args.parse_mode,
         comprehension=comp_config or ComprehensionConfig(),
+        image_download=img_config or ImageDownloadConfig(),
     )
 
     async with UrlParser(config) as parser:
         result = await parser.parse(args.url, force_refresh=args.no_cache)
 
-        if args.format == 'json':
+        # 处理图片下载
+        if args.download_images and args.format == 'markdown':
+            from .image_downloader import ImageDownloader
+            downloader = ImageDownloader(img_config)
+            
+            output_dir = None
+            if args.output:
+                output_dir = str(Path(args.output).parent)
+            elif args.image_dir:
+                output_dir = args.image_dir
+            
+            processed_markdown, _ = downloader.process_markdown(
+                result.to_markdown(), 
+                output_dir,
+                args.url
+            )
+            output = processed_markdown
+            downloader.cleanup()
+        elif args.format == 'json':
             output = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
         else:
             output = result.to_markdown()

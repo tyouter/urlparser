@@ -95,7 +95,7 @@ _ensure_env()
 # =============================================================================
 
 from .core import parse, parse_batch, parse_sync, UrlParser
-from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ComprehensionConfig, RetryConfig
+from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ComprehensionConfig, ImageDownloadConfig, RetryConfig
 from .models import (
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult, ArticleMetadata,
@@ -108,6 +108,12 @@ from .utils import (
     is_audio_file, is_video_file, is_media_file, get_media_duration,
     format_duration, format_duration_detailed, file_size_str, list_files,
 )
+
+# 图片下载模块
+try:
+    from .image_downloader import ImageDownloader
+except ImportError:
+    pass
 
 # Optional imports - these may fail if optional dependencies are not installed
 try:
@@ -163,7 +169,7 @@ try:
     from .dependency_installer import (
         ensure_dependency, ensure_all_dependencies,
         ensure_transcribe_dependencies, ensure_core_dependencies,
-        ensure_comprehension_dependencies,
+        ensure_comprehension_dependencies, ensure_image_dependencies,
         is_package_installed, is_ffmpeg_installed,
     )
 except ImportError:
@@ -181,6 +187,7 @@ __all__ = [
     'TranscribeConfig',
     'BatchTranscribeConfig',
     'ComprehensionConfig',
+    'ImageDownloadConfig',
     'RetryConfig',
 
     'ParseResult',
@@ -192,6 +199,8 @@ __all__ = [
     'ComprehensionResult',
     'VisualFrameResult',
     'RetryAttempt',
+
+    'ImageDownloader',
 
     'BaseFetcher',
     'FetchResult',
@@ -276,6 +285,7 @@ __all__ = [
     'ensure_transcribe_dependencies',
     'ensure_core_dependencies',
     'ensure_comprehension_dependencies',
+    'ensure_image_dependencies',
     'is_package_installed',
     'is_ffmpeg_installed',
 ]
