@@ -247,27 +247,15 @@ async def cmd_parse(args):
     )
 
     async with UrlParser(config) as parser:
-        result = await parser.parse(args.url, force_refresh=args.no_cache)
+        parse_output_dir = None
+        if args.output:
+            parse_output_dir = str(Path(args.output).parent)
+        elif args.image_dir:
+            parse_output_dir = args.image_dir
 
-        # 处理图片下载
-        if args.download_images and args.format == 'markdown':
-            from .image_downloader import ImageDownloader
-            downloader = ImageDownloader(img_config)
-            
-            output_dir = None
-            if args.output:
-                output_dir = str(Path(args.output).parent)
-            elif args.image_dir:
-                output_dir = args.image_dir
-            
-            processed_markdown, _ = downloader.process_markdown(
-                result.to_markdown(), 
-                output_dir,
-                args.url
-            )
-            output = processed_markdown
-            downloader.cleanup()
-        elif args.format == 'json':
+        result = await parser.parse(args.url, force_refresh=args.no_cache, output_dir=parse_output_dir)
+
+        if args.format == 'json':
             output = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
         else:
             output = result.to_markdown()
