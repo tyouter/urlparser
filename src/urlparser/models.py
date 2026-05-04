@@ -220,7 +220,7 @@ class ParseResult:
         platform: 检测到的平台
         title: 标题
         content: 正文内容（纯文本）
-        raw_html: 原始 HTML（可选）
+        raw_html: 原始 HTML（可选，用于提取图片）
         author: 作者
         publish_date: 发布日期
         video_specific: 视频专用元数据
@@ -240,6 +240,7 @@ class ParseResult:
     title: str = ""
     content: str = ""
     raw_text: str = ""
+    raw_html: str = ""
     author: str = ""
     publish_date: str = ""
 

@@ -60,7 +60,7 @@ class ImageDownloader:
 
         # 确定输出目录
         if output_dir:
-            save_dir = Path(output_dir)
+            save_dir = Path(output_dir) / "images"
         elif self.config.image_dir:
             save_dir = Path(self.config.image_dir)
         else:

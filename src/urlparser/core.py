@@ -413,6 +413,7 @@ class UrlParser:
             title=fr.title or "",
             content=fr.text or "",
             raw_text=fr.text or "",
+            raw_html=fr.html or "",
             metadata=dict(fr.metadata) if fr.metadata else {},
             fetch_success=fr.success,
             error=fr.error,
@@ -431,6 +432,12 @@ class UrlParser:
                 danmaku=str(stat.get('danmaku', '')),
             )
             result.author = meta.get('author', '')
+
+        # Extract images from raw_html
+        if result.raw_html and content_type == ContentType.ARTICLE:
+            images_md = UrlParser._extract_images_from_html(result.raw_html)
+            if images_md:
+                result.content = result.content + '\n\n' + images_md
 
         return result
 
@@ -814,6 +821,34 @@ class UrlParser:
             await mgr.interactive_login(platform)
         except Exception:
             pass
+
+    @staticmethod
+    def _extract_images_from_html(html: str) -> str:
+        """从 HTML 中提取图片并转换为 Markdown 格式"""
+        if not html:
+            return ''
+        import re
+        img_pattern = re.compile(
+            r'<img[^>]+src\s*=\s*["\']([^"\']+)["\'][^>]*alt\s*=\s*["\']([^"\']+)["\'][^>]*>|'
+            r'<img[^>]+alt\s*=\s*["\']([^"\']+)["\'][^>]*src\s*=\s*["\']([^"\']+)["\'][^>]*>|'
+            r'<img[^>]+src\s*=\s*["\']([^"\']+)["\'][^>]*>',
+            re.IGNORECASE
+        )
+        images = []
+        for match in img_pattern.finditer(html):
+            if match.group(1):
+                src = match.group(1)
+                alt = match.group(2) or ''
+            elif match.group(3):
+                alt = match.group(3)
+                src = match.group(4)
+            else:
+                src = match.group(5)
+                alt = ''
+            if src.startswith('data:'):
+                continue
+            images.append(f'![{alt}]({src})')
+        return '\n'.join(images)
 
     def _build_login_hint(self, platform: str) -> str:
         return self._LOGIN_HINTS.get(platform, '')

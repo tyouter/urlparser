@@ -82,6 +82,25 @@ class GenericParser(BaseParser):
             result['raw_text'] = ''
 
         try:
+            html_content = await page.evaluate('''() => {
+                const contentSelectors = [
+                    'article', '.content', '.post-content', 'main',
+                    '.article-body', '#content', '[role="main"]', '.post',
+                    '.RichContent-inner', '.Post-RichText'
+                ];
+                for (const sel of contentSelectors) {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        return el.innerHTML;
+                    }
+                }
+                return '';
+            }''')
+            result['raw_html'] = html_content or ''
+        except Exception:
+            result['raw_html'] = ''
+
+        try:
             description = await page.evaluate('''() => {
                 const el = document.querySelector('meta[name="description"]');
                 return el ? el.getAttribute('content') : '';
@@ -107,11 +126,56 @@ class GenericParser(BaseParser):
 
         return result
 
+    def _extract_images_from_html(self, html: str) -> str:
+        """从 HTML 中提取图片并转换为 Markdown 格式"""
+        if not html:
+            return ''
+            
+        import re
+        
+        # 匹配 img 标签，提取 src 和 alt
+        img_pattern = re.compile(
+            r'<img[^>]+src\s*=\s*["\']([^"\']+)["\'][^>]*alt\s*=\s*["\']([^"\']+)["\'][^>]*>|'
+            r'<img[^>]+alt\s*=\s*["\']([^"\']+)["\'][^>]*src\s*=\s*["\']([^"\']+)["\'][^>]*>|'
+            r'<img[^>]+src\s*=\s*["\']([^"\']+)["\'][^>]*>',
+            re.IGNORECASE
+        )
+        
+        images = []
+        for match in img_pattern.finditer(html):
+            # 处理三种情况
+            if match.group(1):
+                src = match.group(1)
+                alt = match.group(2) or ''
+            elif match.group(3):
+                alt = match.group(3)
+                src = match.group(4)
+            else:
+                src = match.group(5)
+                alt = ''
+            
+            # 跳过数据 URL
+            if src.startswith('data:'):
+                continue
+                
+            images.append(f'![{alt}]({src})')
+        
+        return '\n'.join(images)
+
     def post_process(self, content: Dict):
         raw_text = content.get('raw_text', '')
         if raw_text:
             content['raw_text'] = ContentCleanMixin.remove_duplicate_lines(
                 ContentCleanMixin.clean_text(raw_text)
             )
+
+        # 提取图片
+        html_content = content.get('raw_html', '')
+        if html_content:
+            images_md = self._extract_images_from_html(html_content)
+            if images_md:
+                # 将图片添加到内容末尾
+                current_content = content.get('content', '')
+                content['content'] = current_content + '\n\n' + images_md
 
         return super().post_process(content)
