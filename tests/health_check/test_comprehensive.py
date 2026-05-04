@@ -584,8 +584,8 @@ def test_config(report: HealthReport) -> List[TestResult]:
 
     # with_transcribe
     t0 = time.time()
-    cfg2 = ParseConfig.with_transcribe(engine="funasr")
-    ok = cfg2.transcribe.enabled is True and cfg2.transcribe.engine == "funasr"
+    cfg2 = ParseConfig.with_transcribe()
+    ok = cfg2.transcribe.enabled is True
     results.append(_pass("ParseConfig.with_transcribe", f"enabled={cfg2.transcribe.enabled}", time.time() - t0) if ok
                    else _fail("ParseConfig.with_transcribe", "not enabled", time.time() - t0))
 

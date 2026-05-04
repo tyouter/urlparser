@@ -101,6 +101,7 @@ tests/ES9*/
 
 # output
 output/
+images/
 
 # cookies
 cookies/
