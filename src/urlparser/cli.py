@@ -273,7 +273,9 @@ async def cmd_parse(args):
             output = result.to_markdown()
 
         if args.output:
-            Path(args.output).write_text(output, encoding='utf-8')
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(output, encoding='utf-8')
             print(f"已保存到: {args.output}")
         else:
             print(output)

@@ -40,6 +40,9 @@ _CONTENT_SELECTORS = {
     'www.xiaohongshu.com': '.note-text, .desc',
     'sspai.com': '.article-content, .content',
     'www.sspai.com': '.article-content, .content',
+    'ifeng.com': '[class*="artical"], [class*="article"], [class*="content"]',
+    'auto.ifeng.com': '[class*="artical"], [class*="article"], [class*="content"]',
+    'www.ifeng.com': '[class*="artical"], [class*="article"], [class*="content"]',
 }
 
 _TITLE_SELECTORS = {
@@ -179,15 +182,15 @@ class BbBrowserFetcher(BaseFetcher):
             return data.get('data', {}).get('result')
         raise RuntimeError(f"bb-browser eval error: {data.get('error', 'unknown')}")
 
-    async def bb_open_and_read(self, url: str) -> Tuple[str, str]:
+    async def bb_open_and_read(self, url: str) -> Tuple[str, str, str]:
         """
-        打开 URL 并读取页面标题和正文内容
+        打开 URL 并读取页面标题、正文内容和 HTML
 
         Args:
             url: 目标 URL
 
         Returns:
-            (title, content) 元组
+            (title, content, html) 元组
         """
         cmd = ['bb-browser', 'open', url]
         out, err, code = await self._run_exec(cmd)
@@ -228,7 +231,19 @@ class BbBrowserFetcher(BaseFetcher):
             except Exception:
                 pass
 
-        return title, content
+        html = ''
+        try:
+            js = f"document.querySelector('{selector}')?.innerHTML"
+            result = await self.bb_eval(js)
+            html = str(result) if isinstance(result, str) else ''
+        except Exception:
+            try:
+                result = await self.bb_eval("document.body.innerHTML")
+                html = str(result) if isinstance(result, str) else ''
+            except Exception:
+                pass
+
+        return title, content, html
 
     async def get_bilibili_audio_url(self, bvid: str, cid: int) -> Optional[str]:
         api_url = (
@@ -512,7 +527,7 @@ class BbBrowserFetcher(BaseFetcher):
         - adapter 失败的情况 (如知乎回答页)
         """
         try:
-            title, content = await self.bb_open_and_read(url)
+            title, content, html = await self.bb_open_and_read(url)
 
             if not content or not content.strip():
                 return FetchResult(
@@ -545,6 +560,7 @@ class BbBrowserFetcher(BaseFetcher):
                 url=url,
                 text=text,
                 title=title,
+                html=html,
                 status_code=200,
                 strategy=FetchStrategy.BB_BROWSER,
                 success=True,
@@ -560,7 +576,7 @@ class BbBrowserFetcher(BaseFetcher):
                 restarted = await self._try_restart_daemon()
                 if restarted:
                     try:
-                        title, content = await self.bb_open_and_read(url)
+                        title, content, html = await self.bb_open_and_read(url)
                         if content and content.strip():
                             domain = urlparse(url).netloc.lower()
                             platform = 'unknown'
@@ -583,6 +599,7 @@ class BbBrowserFetcher(BaseFetcher):
                                 url=url,
                                 text=text,
                                 title=title,
+                                html=html,
                                 status_code=200,
                                 strategy=FetchStrategy.BB_BROWSER,
                                 success=True,

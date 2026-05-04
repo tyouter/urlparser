@@ -55,6 +55,7 @@ class UrlParser:
         self,
         url: str,
         config: Optional[ParseConfig] = None,
+        output_dir: Optional[str] = None,
         **kwargs
     ) -> ParseResult:
         """
@@ -63,6 +64,7 @@ class UrlParser:
         Args:
             url: 要解析的 URL
             config: 可选配置（覆盖默认）
+            output_dir: 可选输出目录（用于保存图片）
             **kwargs: 快捷参数
 
         Returns:
@@ -101,6 +103,10 @@ class UrlParser:
             else:
                 result = await self._do_parse(url, cfg)
             result.parse_time = round(time.time() - start_time, 2)
+
+            # 下载图片（如果启用）
+            if cfg.image_download.enabled:
+                result = UrlParser._download_images_in_content(result, cfg, output_dir)
 
             # Write to cache on success
             if result.fetch_success and self._cache:
@@ -433,12 +439,57 @@ class UrlParser:
             )
             result.author = meta.get('author', '')
 
-        # Extract images from raw_html
+        # Convert raw_html directly to markdown with images in correct positions
         if result.raw_html and content_type == ContentType.ARTICLE:
-            images_md = UrlParser._extract_images_from_html(result.raw_html)
-            if images_md:
-                result.content = result.content + '\n\n' + images_md
+            content_from_html = UrlParser._html_to_markdown(result.raw_html, result.url)
+            if content_from_html:
+                # Use the HTML-converted content which has images in correct positions
+                result.content = content_from_html
 
+        return result
+
+    @staticmethod
+    def _download_images_in_content(
+        result: 'ParseResult', 
+        config: 'ParseConfig', 
+        output_dir: Optional[str] = None
+    ) -> 'ParseResult':
+        """
+        下载内容中的图片
+        
+        Args:
+            result: 解析结果
+            config: 解析配置
+            output_dir: 输出目录（可选）
+        
+        Returns:
+            更新后的解析结果
+        """
+        if not config.image_download.enabled or not result.content:
+            return result
+        
+        try:
+            from .image_downloader import ImageDownloader
+            
+            downloader = ImageDownloader(config.image_download)
+            processed_content, downloaded_images = downloader.process_markdown(
+                markdown=result.content,
+                output_dir=output_dir,
+                base_url=result.url
+            )
+            
+            if processed_content:
+                result.content = processed_content
+                result.metadata['downloaded_images'] = downloaded_images
+            
+            downloader.cleanup()
+            
+        except Exception as e:
+            # 图片下载失败不应影响整个解析流程
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"图片下载失败: {e}")
+        
         return result
 
     async def _do_parse(self, url: str, config: ParseConfig) -> ParseResult:
@@ -823,32 +874,253 @@ class UrlParser:
             pass
 
     @staticmethod
-    def _extract_images_from_html(html: str) -> str:
-        """从 HTML 中提取图片并转换为 Markdown 格式"""
+    def _html_to_markdown(html: str, base_url: str = '') -> str:
+        """
+        将 HTML 转换为 Markdown，保持图片位置并进行内容清理
+        使用 BeautifulSoup 更准确地解析 HTML
+        """
         if not html:
             return ''
-        import re
-        img_pattern = re.compile(
-            r'<img[^>]+src\s*=\s*["\']([^"\']+)["\'][^>]*alt\s*=\s*["\']([^"\']+)["\'][^>]*>|'
-            r'<img[^>]+alt\s*=\s*["\']([^"\']+)["\'][^>]*src\s*=\s*["\']([^"\']+)["\'][^>]*>|'
-            r'<img[^>]+src\s*=\s*["\']([^"\']+)["\'][^>]*>',
-            re.IGNORECASE
-        )
-        images = []
-        for match in img_pattern.finditer(html):
-            if match.group(1):
-                src = match.group(1)
-                alt = match.group(2) or ''
-            elif match.group(3):
-                alt = match.group(3)
-                src = match.group(4)
-            else:
-                src = match.group(5)
-                alt = ''
-            if src.startswith('data:'):
+        from urllib.parse import urljoin, urlparse, unquote
+        from bs4 import BeautifulSoup, Comment
+        
+        # 从 base_url 提取协议和域名
+        base_scheme = ''
+        base_domain = ''
+        if base_url:
+            parsed = urlparse(base_url)
+            base_scheme = parsed.scheme
+            base_domain = parsed.netloc
+        
+        soup = BeautifulSoup(html, 'lxml')
+        
+        # 1. 移除所有不需要的元素
+        for element in soup.find_all(['script', 'style', 'noscript', 'svg', 'iframe', 'form']):
+            element.decompose()
+        
+        # 2. 移除导航和侧边栏等布局元素
+        for element in soup.find_all(['nav', 'aside', 'header', 'footer', 'menu']):
+            element.decompose()
+        
+        # 3. 移除广告和推荐内容（基于 class 和 id）
+        ad_keywords = ['ad', 'advert', 'banner', 'sponsor', 'promo', 'recommend', 'related', 'footer', 'sidebar', 'nav']
+        for element in soup.find_all(class_=lambda x: x and any(key in str(x).lower() for key in ad_keywords)):
+            element.decompose()
+        
+        for element in soup.find_all(id=lambda x: x and any(key in str(x).lower() for key in ad_keywords)):
+            element.decompose()
+        
+        # 4. 移除注释
+        for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+            comment.extract()
+        
+        seen_urls = set()
+        
+        # 5. 处理图片
+        for img in soup.find_all('img'):
+            src = img.get('data-lazyload', '') or img.get('data-src', '') or img.get('src', '')
+            if not src:
+                img.decompose()
                 continue
-            images.append(f'![{alt}]({src})')
-        return '\n'.join(images)
+            
+            # 检查是否从 data-lazyload 或 data-src 获取到真实 URL
+            # 如果 src 是 data: URL，我们需要检查是否有 data-lazyload 或 data-src
+            if src.startswith('data:'):
+                # 尝试优先使用 data-lazyload 或 data-src
+                real_src = img.get('data-lazyload', '') or img.get('data-src', '')
+                if real_src and not real_src.startswith('data:'):
+                    src = real_src
+                else:
+                    img.decompose()
+                    continue
+            
+            # 补全协议相对 URL
+            if src.startswith('//'):
+                if base_scheme:
+                    src = f'{base_scheme}:{src}'
+                else:
+                    src = f'https:{src}'
+            # 补全相对路径 URL
+            elif not src.startswith(('http://', 'https://')) and base_url:
+                src = urljoin(base_url, src)
+            
+            # 去重
+            if src in seen_urls:
+                img.decompose()
+                continue
+            
+            # 过滤小尺寸图片
+            width = img.get('width', 0)
+            height = img.get('height', 0)
+            try:
+                width = int(width) if width else 0
+                height = int(height) if height else 0
+            except (ValueError, TypeError):
+                width = 0
+                height = 0
+            
+            if width > 0 and height > 0 and width < 50 and height < 50:
+                img.decompose()
+                continue
+            
+            # 过滤 URL 包含广告关键词（匹配完整单词或路径段，避免误判哈希值）
+            src_lower = src.lower()
+            bad_keywords = ['logo', 'icon', 'qr', 'qrcode', 'avatar', 'profile', 'banner', 'tracking', 'pixel', 'stat']
+            bad_keywords_with_boundaries = [
+                # 匹配作为路径段或文件名的关键词，前后有 /、_、- 或 .
+                '/logo/', '/logo_', '_logo.', 
+                '/icon/', '/icon_', '_icon.',
+                '/qr/', '/qr_', '_qr.',
+                '/qrcode/', '/qrcode_', '_qrcode.',
+                '/avatar/', '/avatar_', '_avatar.',
+                '/profile/', '/profile_', '_profile.',
+                '/banner/', '/banner_', '_banner.',
+                '/tracking/', '/tracking_', '_tracking.',
+                '/pixel/', '/pixel_', '_pixel.',
+                '/stat/', '/stat_', '_stat.'
+            ]
+            # 简单检查完整路径中是否有作为独立路径段或文件名部分的关键词
+            # 避免简单包含匹配，比如哈希值中的 'add' 被误判为 'ad'
+            has_bad = False
+            
+            # 检查文件名和路径段
+            parsed_url = urlparse(src_lower)
+            path_parts = parsed_url.path.split('/')
+            filename = path_parts[-1] if path_parts else ''
+            
+            # 检查文件名是否包含关键词作为前缀或后缀
+            for kw in bad_keywords:
+                if filename.startswith(kw + '_') or filename.endswith('_' + kw) or filename == kw or f'_{kw}_' in filename:
+                    has_bad = True
+                    break
+                if any(part == kw or part.startswith(kw + '_') or part.endswith('_' + kw) for part in path_parts):
+                    has_bad = True
+                    break
+            
+            if has_bad:
+                img.decompose()
+                continue
+            
+            # 过滤静态资源路径
+            bad_paths = ['/static/', '/assets/', '/img/icon', '/image/icon', '/images/icon']
+            if any(path in src_lower for path in bad_paths):
+                img.decompose()
+                continue
+            
+            # 检查文件名
+            path = urlparse(src).path
+            filename = unquote(path.split('/')[-1].lower())
+            bad_patterns = ['_w100', '_w200', '_h100', '_h200', '_s.png', '_s.jpg', '_thumb', '_small']
+            if any(pat in filename for pat in bad_patterns):
+                img.decompose()
+                continue
+            
+            seen_urls.add(src)
+            alt = img.get('alt', '') or img.get('title', '')
+            img.replace_with(f'\n\n![{alt}]({src})\n\n')
+        
+        # 6. 处理标题
+        for i in range(6, 0, -1):
+            for h in soup.find_all(f'h{i}'):
+                text = h.get_text(strip=True)
+                if text:
+                    h.replace_with(f'\n\n{"#" * i} {text}\n\n')
+                else:
+                    h.decompose()
+        
+        # 7. 处理段落和换行
+        for p in soup.find_all('p'):
+            text = p.get_text(strip=True)
+            if text:
+                p.replace_with(f'{text}\n\n')
+            else:
+                p.decompose()
+        
+        for br in soup.find_all('br'):
+            br.replace_with('\n')
+        
+        # 8. 处理链接
+        for a in soup.find_all('a'):
+            href = a.get('href', '')
+            text = a.get_text(strip=True)
+            if not text:
+                a.decompose()
+                continue
+            
+            # 补全链接 URL
+            if href:
+                if href.startswith('//'):
+                    if base_scheme:
+                        href = f'{base_scheme}:{href}'
+                    else:
+                        href = f'https:{href}'
+                elif not href.startswith(('http://', 'https://')) and base_url:
+                    href = urljoin(base_url, href)
+                
+                a.replace_with(f'[{text}]({href})')
+            else:
+                a.replace_with(text)
+        
+        # 9. 处理列表
+        for ul in soup.find_all('ul'):
+            items = []
+            for li in ul.find_all('li', recursive=False):
+                items.append(f'- {li.get_text(strip=True)}')
+            if items:
+                ul.replace_with('\n'.join(items) + '\n\n')
+            else:
+                ul.decompose()
+        
+        for ol in soup.find_all('ol'):
+            items = []
+            for idx, li in enumerate(ol.find_all('li', recursive=False), 1):
+                items.append(f'{idx}. {li.get_text(strip=True)}')
+            if items:
+                ol.replace_with('\n'.join(items) + '\n\n')
+            else:
+                ol.decompose()
+        
+        # 10. 提取最终文本并清理
+        text = soup.get_text(separator='\n')
+        
+        # 处理 HTML 实体
+        import html
+        text = html.unescape(text)
+        
+        # 清理多余的换行
+        lines = []
+        last_line_was_empty = False
+        for line in text.split('\n'):
+            stripped_line = line.strip()
+            if not stripped_line:
+                if not last_line_was_empty:
+                    lines.append('')
+                last_line_was_empty = True
+            else:
+                lines.append(stripped_line)
+                last_line_was_empty = False
+        
+        cleaned_text = '\n'.join(lines).strip()
+        
+        # 11. 清理末尾的广告和推荐内容（从常见关键词开始截断）
+        cutoff_keywords = [
+            '特别声明',
+            'Notice:',
+            '推荐',
+            '### 精品有声',
+            '### 好书精选',
+            '凤凰V现场',
+            '查看更多',
+        ]
+        
+        for keyword in cutoff_keywords:
+            idx = cleaned_text.find(keyword)
+            if idx != -1:
+                # 找到关键词，截断文本
+                cleaned_text = cleaned_text[:idx].strip()
+                break
+        
+        return cleaned_text
 
     def _build_login_hint(self, platform: str) -> str:
         return self._LOGIN_HINTS.get(platform, '')
