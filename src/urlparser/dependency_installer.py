@@ -129,9 +129,7 @@ def is_package_installed(package_name: str) -> Tuple[bool, Optional[str]]:
         (是否已安装, 版本号)
     """
     try:
-        # 尝试导入
         importlib.import_module(package_name.replace("-", "_"))
-        # 获取版本
         try:
             import importlib.metadata as metadata
             version = metadata.version(package_name)
@@ -139,7 +137,12 @@ def is_package_installed(package_name: str) -> Tuple[bool, Optional[str]]:
             version = None
         return True, version
     except ImportError:
-        return False, None
+        try:
+            import importlib.metadata as metadata
+            version = metadata.version(package_name)
+            return True, version
+        except Exception:
+            return False, None
 
 
 def is_ffmpeg_installed() -> Tuple[bool, Optional[str]]:
