@@ -25,10 +25,14 @@ from typing import Dict, List, Optional
 
 
 def _get_cookies_dir() -> Path:
-    src_dir = Path(__file__).parent.parent.parent / "cookies"
-    if (src_dir / "xiaohongshu_cookies.json").exists() or (src_dir / "zhihu_cookies.json").exists():
-        return src_dir
     user_dir = Path(os.path.expanduser("~")) / ".urlparser" / "cookies"
+    src_dir = Path(__file__).parent.parent.parent / "cookies"
+    if src_dir.exists() and any(src_dir.glob("*_cookies.json")):
+        if not user_dir.exists() or not any(user_dir.glob("*_cookies.json")):
+            import shutil
+            user_dir.mkdir(parents=True, exist_ok=True)
+            for f in src_dir.glob("*_cookies.json"):
+                shutil.copy2(f, user_dir / f.name)
     user_dir.mkdir(parents=True, exist_ok=True)
     return user_dir
 
