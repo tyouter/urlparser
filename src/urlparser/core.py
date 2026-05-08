@@ -153,6 +153,7 @@ class UrlParser:
                 quality_ok, q_reason = ContentQualityMixin.validate_quality(
                     result.title, result.content,
                     min_length=config.retry.min_quality_length,
+                    platform=platform,
                 )
 
                 if not blocked and quality_ok:
@@ -239,6 +240,7 @@ class UrlParser:
                 quality_ok, q_reason = ContentQualityMixin.validate_quality(
                     candidate.title, candidate.content,
                     min_length=config.retry.min_quality_length,
+                    platform=platform,
                 )
 
                 if not blocked and quality_ok:
@@ -1171,6 +1173,7 @@ class UrlParser:
             quality_ok, _ = ContentQualityMixin.validate_quality(
                 candidate.title, candidate.content,
                 min_length=config.retry.min_quality_length,
+                platform=platform,
             )
             if not blocked and quality_ok:
                 return candidate

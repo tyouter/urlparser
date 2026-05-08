@@ -5,10 +5,20 @@ Playwright 直接读取器
 """
 
 import asyncio
-from typing import Optional
+from typing import Optional, Tuple
+from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from .base import BaseFetcher, FetchResult, FetchConfig, FetchStrategy
+
+
+_BILIBILI_VIDEO_SELECTORS = {
+    'title': '.video-title, h1[data-title], .tit',
+    'author': '.up-name, .username',
+    'stats': '.video-info-detail, .video-data',
+    'desc': '.basic-desc-info, .desc-info-text, .video-desc',
+    'main_content': '.video-container-center, .bpx-player-container, .video-info-m',
+}
 
 
 class PlaywrightFetcher(BaseFetcher):
@@ -180,6 +190,58 @@ class PlaywrightFetcher(BaseFetcher):
 
         await page.evaluate('window.scrollTo(0, 0)')
 
+    async def _extract_bilibili_video_content(self, page: Page) -> Tuple[str, str]:
+        """提取B站视频页面的核心内容"""
+        parts = []
+        title = ''
+
+        for selector in _BILIBILI_VIDEO_SELECTORS['title'].split(', '):
+            try:
+                el = await page.query_selector(selector)
+                if el:
+                    title = (await el.inner_text()).strip()
+                    if title:
+                        parts.append(f"# {title}")
+                        break
+            except Exception:
+                continue
+
+        for selector in _BILIBILI_VIDEO_SELECTORS['author'].split(', '):
+            try:
+                el = await page.query_selector(selector)
+                if el:
+                    author = (await el.inner_text()).strip()
+                    if author:
+                        parts.append(f"作者: {author}")
+                        break
+            except Exception:
+                continue
+
+        for selector in _BILIBILI_VIDEO_SELECTORS['stats'].split(', '):
+            try:
+                el = await page.query_selector(selector)
+                if el:
+                    stats = (await el.inner_text()).strip()
+                    if stats:
+                        parts.append(stats)
+                        break
+            except Exception:
+                continue
+
+        for selector in _BILIBILI_VIDEO_SELECTORS['desc'].split(', '):
+            try:
+                el = await page.query_selector(selector)
+                if el:
+                    desc = (await el.inner_text()).strip()
+                    if desc:
+                        parts.append(f"\n## 简介\n{desc}")
+                        break
+            except Exception:
+                continue
+
+        text = '\n'.join(parts)
+        return title, text
+
     async def fetch(self, url: str, **kwargs) -> FetchResult:
         try:
             await self._ensure_browser()
@@ -199,9 +261,18 @@ class PlaywrightFetcher(BaseFetcher):
                 if self.config.scroll_enabled:
                     await self._scroll_to_load_all(page)
 
-                title = await page.title()
-                text = await page.evaluate('document.body.innerText')
                 html = await page.content()
+                
+                domain = urlparse(url).netloc.lower()
+                is_bilibili_video = 'bilibili.com' in domain and '/video/' in url
+                
+                if is_bilibili_video:
+                    title, text = await self._extract_bilibili_video_content(page)
+                    if not title:
+                        title = await page.title()
+                else:
+                    title = await page.title()
+                    text = await page.evaluate('document.body.innerText')
 
                 return FetchResult(
                     url=url,

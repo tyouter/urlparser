@@ -155,7 +155,10 @@ class ContentQualityMixin:
         return None
 
     @staticmethod
-    def validate_quality(title: str, text: str, min_length: int = 100) -> Tuple[bool, str]:
+    def validate_quality(title: str, text: str, min_length: int = 100, platform: str = "") -> Tuple[bool, str]:
+        if platform == "bilibili":
+            min_length = 20
+        
         if not text or len(text.strip()) < min_length:
             return False, f"content too short ({len(text.strip()) if text else 0} chars, need {min_length})"
         if not title or len(title.strip()) < 2:
