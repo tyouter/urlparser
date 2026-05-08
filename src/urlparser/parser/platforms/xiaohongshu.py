@@ -297,17 +297,40 @@ class XiaohongshuParser(ArticleParser):
         if 'discovery/item' in actual_url:
             actual_url = actual_url.replace('discovery/item', 'explore')
 
-        return await super()._fetch_with_page(page, actual_url)
+        result = await super()._fetch_with_page(page, actual_url)
+
+        current_url = ''
+        try:
+            current_url = await page.evaluate('window.location.href')
+        except Exception:
+            pass
+
+        if self._is_on_homepage(current_url) or getattr(self, '_login_popup_dismissed', False):
+            try:
+                await page.goto(actual_url, timeout=60000, wait_until='domcontentloaded')
+                await asyncio.sleep(3)
+                self._login_popup_dismissed = False
+                content = await self.extract_content(page)
+                content['url'] = actual_url
+                content['platform'] = self.platform
+                content['fetch_success'] = True
+                result = self.post_process(content)
+            except Exception:
+                pass
+
+        return result
+
+    @staticmethod
+    def _is_on_homepage(current_url: str) -> bool:
+        if not current_url:
+            return False
+        from urllib.parse import urlparse
+        parsed = urlparse(current_url)
+        path = parsed.path.rstrip('/')
+        return path == '' or path == '/'
 
     async def _handle_redirect(self, page: Page, url: str) -> str:
         try:
-            await page.goto(
-                'https://www.xiaohongshu.com',
-                timeout=60000,
-                wait_until='domcontentloaded'
-            )
-            await asyncio.sleep(3)
-
             redirect_path = url.split('redirectPath=')[1].split('&')[0]
             actual_url = urllib.parse.unquote(redirect_path)
 
@@ -319,6 +342,7 @@ class XiaohongshuParser(ArticleParser):
             return url
 
     async def pre_process(self, page: Page):
+        self._login_popup_dismissed = False
         await ContentQualityMixin.dismiss_popups(page)
         await asyncio.sleep(2)
 
@@ -340,6 +364,7 @@ class XiaohongshuParser(ArticleParser):
                         btn = await page.query_selector(sel)
                         if btn and await btn.is_visible():
                             await btn.click()
+                            self._login_popup_dismissed = True
                             await asyncio.sleep(2)
                             break
                     except Exception:
@@ -347,6 +372,7 @@ class XiaohongshuParser(ArticleParser):
 
                 try:
                     await page.keyboard.press('Escape')
+                    self._login_popup_dismissed = True
                     await asyncio.sleep(1)
                 except Exception:
                     pass

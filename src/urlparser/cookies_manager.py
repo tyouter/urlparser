@@ -17,12 +17,23 @@ Cookie 交互式获取工具
 
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-COOKIES_DIR = Path(__file__).parent.parent.parent / "cookies"
+
+def _get_cookies_dir() -> Path:
+    src_dir = Path(__file__).parent.parent.parent / "cookies"
+    if (src_dir / "xiaohongshu_cookies.json").exists() or (src_dir / "zhihu_cookies.json").exists():
+        return src_dir
+    user_dir = Path(os.path.expanduser("~")) / ".urlparser" / "cookies"
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir
+
+
+COOKIES_DIR = _get_cookies_dir()
 
 PLATFORM_DOMAINS: Dict[str, str] = {
     "xiaohongshu": ".xiaohongshu.com",
