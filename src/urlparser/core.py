@@ -445,8 +445,12 @@ class UrlParser:
         if result.raw_html and content_type == ContentType.ARTICLE:
             content_from_html = UrlParser._html_to_markdown(result.raw_html, result.url)
             if content_from_html:
-                # Use the HTML-converted content which has images in correct positions
                 result.content = content_from_html
+
+        if platform == 'weixin' and result.content:
+            from .parser.mixins.content_clean import ContentCleanMixin
+            result.content = ContentCleanMixin.clean_weixin_text(result.content)
+            result.raw_text = ContentCleanMixin.clean_weixin_text(result.raw_text)
 
         return result
 
@@ -1118,7 +1122,8 @@ class UrlParser:
         for keyword in cutoff_keywords:
             idx = cleaned_text.find(keyword)
             if idx != -1:
-                # 找到关键词，截断文本
+                if idx < len(cleaned_text) * 0.8:
+                    continue
                 cleaned_text = cleaned_text[:idx].strip()
                 break
         

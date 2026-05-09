@@ -219,31 +219,159 @@ class BbBrowserFetcher(BaseFetcher):
                 pass
 
         selector = _CONTENT_SELECTORS.get(domain, 'body')
+
+        if 'mp.weixin.qq.com' in domain:
+            content, html = await self._read_weixin_content(selector)
+        else:
+            content = ''
+            try:
+                js = f"document.querySelector('{selector}').innerText"
+                result = await self.bb_eval(js)
+                content = str(result) if isinstance(result, str) else ''
+            except Exception:
+                try:
+                    result = await self.bb_eval("document.body.innerText")
+                    content = str(result) if isinstance(result, str) else ''
+                except Exception:
+                    pass
+
+            html = ''
+            try:
+                js = f"document.querySelector('{selector}')?.innerHTML"
+                result = await self.bb_eval(js)
+                html = str(result) if isinstance(result, str) else ''
+            except Exception:
+                try:
+                    result = await self.bb_eval("document.body.innerHTML")
+                    html = str(result) if isinstance(result, str) else ''
+                except Exception:
+                    pass
+
+        return title, content, html
+
+    async def _read_weixin_content(self, selector: str) -> Tuple[str, str]:
+        _weixin_remove = [
+            '#js_pc_qr_code', '#js_share_guide', '#js_sponsor_ad_area',
+            '#js_tags_preview_area', '#js_tags_area', '.reward_area',
+            '.reward_area_box', '.read_more_area', '.rich_media_tool_area',
+            '#js_reader_bottom_area', '#js_cmt_area', '#js_comment_area',
+            '.comment_area', '#js_pc_toast', '#js_image_view',
+            '.profile_card_wrap', '.rich_media_area_extra',
+            '#js_tags_container', '.article-bottom-area', '.share_area',
+            '.tips_global', '.weui-dialog', '.weui-mask', '.weui-toast',
+            '#js_bottom_banner', '.bottom_banner_area', '#js_ad_area',
+            '.rich_media_ad_switch', '.js_ad_container', '.js_ad_inner',
+            '#js_tags_list', '.rich_media_tool', '#js_article_edit_area',
+            '.original_area', '.copyright_area', '#js_author_name',
+            '.profile_arrow_wrap', '.js_wx_tap_highlight',
+            '#js_content_bottom_area', '.rich_media_content_primary_bottom',
+            '#js_vote_area', '.vote_area', '.js_img_popup_area',
+            '#js_img_popup', '.img_popup_area', '#js_pc_close_btn',
+            '.pc_close_btn', '#js_next_article_area', '.next_article_area',
+            '#js_chinese_suggest', '.chinese_suggest',
+            '.js_appmsg_analysis', '.appmsg_analysis',
+            '#js_content_bottom_toolbar', '.rich_media_tool_area_new',
+            '#js_like_old_area', '#js_like_area', '.like_area',
+            '#js_wx_tap_reader', '.wx_tap_reader', '#js_media_banner',
+            '.media_banner', '#js_sponsor_tips', '.sponsor_tips',
+            '#js_pay_bottom', '.pay_bottom_area', '#js_pay_area',
+            '.pay_area', '#js_inclue_area', '.inclue_area',
+            '#js_operate_area', '.operate_area', '#js_author_card',
+            '.author_card', '#js_profile_qrcode', '.profile_qrcode',
+            '#js_recom_article_area', '.recom_article_area',
+            '#js_recom_article_list', '.recom_article_list',
+            '#js_bottom_business_area', '.bottom_business_area',
+            '#js_report_area', '.report_area', '#js_pc_qr_code_show',
+            '.pc_qr_code_show', '#js_subscribe_area', '.subscribe_area',
+            '#js_subscribe_btn', '.subscribe_btn',
+            '#js_article_follow_btn', '.article_follow_btn',
+            '#js_readmore3', '.read_more_btn', '#js_reader_qrcode',
+            '.reader_qrcode', '#js_font_area', '.font_area',
+            '#js_content_bottom', '.content_bottom_area',
+            '#js_album_area', '.album_area', '#js_album_list',
+            '.album_list', '#js_source_area', '.source_area',
+            '#js_content_header', '.content_header_area',
+            '#js_mini_program_bottom', '.mini_program_bottom',
+            '#js_redpacketcover', '.redpacketcover',
+            '#js_appmsg_copyright', '.appmsg_copyright_area',
+            '#js_view_source', '.view_source', '.qr_code_pc',
+            '#js_share_friend', '#js_share_moments',
+            '#js_share_favorite', '#js_share_weibo', '#js_share_copy',
+            '.share_btn', '.js_share_btn', '#js_share_btn_area',
+            '.share_btn_area', '#js_more_read_area', '.more_read_area',
+            '#js_tags_recommend', '.tags_recommend',
+            '#js_comment_tip', '.comment_tip', '#js_write_comment',
+            '.write_comment', '#js_selected_comment', '.selected_comment',
+            '#js_comment_list', '.comment_list', '#js_cmt_list', '.cmt_list',
+            '#js_cmt_header', '.cmt_header', '#js_cmt_switch', '.cmt_switch',
+            '#js_cmt_search', '.cmt_search', '#js_cmt_more', '.cmt_more',
+            '#js_cmt_no_comment', '.cmt_no_comment', '#js_cmt_loading',
+            '.cmt_loading', '#js_cmt_error', '.cmt_error',
+            '#js_cmt_single', '.cmt_single', '#js_cmt_reply', '.cmt_reply',
+            '#js_cmt_like', '.cmt_like', '#js_cmt_report', '.cmt_report',
+            '#js_cmt_delete', '.cmt_delete', '#js_cmt_avatar', '.cmt_avatar',
+            '#js_cmt_nickname', '.cmt_nickname', '#js_cmt_text', '.cmt_text',
+            '#js_cmt_time', '.cmt_time', '#js_cmt_location', '.cmt_location',
+        ]
+
+        remove_js = json.dumps(_weixin_remove)
+
         content = ''
         try:
-            js = f"document.querySelector('{selector}').innerText"
+            js = f'''(() => {{
+                const removeSelectors = {remove_js};
+                const contentEl = document.querySelector('{selector}');
+                if (!contentEl) return document.body.innerText;
+                const clone = contentEl.cloneNode(true);
+                for (const sel of removeSelectors) {{
+                    const els = clone.querySelectorAll(sel);
+                    els.forEach(el => el.remove());
+                }}
+                clone.querySelectorAll('script, style, svg, iframe, noscript').forEach(el => el.remove());
+                const images = clone.querySelectorAll('img');
+                images.forEach(img => {{
+                    const src = img.getAttribute('data-src') || img.getAttribute('src') || '';
+                    const alt = img.getAttribute('alt') || '';
+                    if (src && !src.startsWith('data:')) {{
+                        const span = document.createElement('span');
+                        span.setAttribute('data-img-src', src);
+                        span.textContent = `[图片: ${{alt || src.split('/').pop().split('?')[0].split('#')[0]}}]`;
+                        img.replaceWith(span);
+                    }} else {{
+                        img.remove();
+                    }}
+                }});
+                return clone.innerText;
+            }})()'''
             result = await self.bb_eval(js)
             content = str(result) if isinstance(result, str) else ''
         except Exception:
             try:
-                result = await self.bb_eval("document.body.innerText")
+                result = await self.bb_eval(f"document.querySelector('{selector}')?.innerText")
                 content = str(result) if isinstance(result, str) else ''
             except Exception:
                 pass
 
         html = ''
         try:
-            js = f"document.querySelector('{selector}')?.innerHTML"
+            js = f'''(() => {{
+                const removeSelectors = {remove_js};
+                const contentEl = document.querySelector('{selector}');
+                if (!contentEl) return '';
+                const clone = contentEl.cloneNode(true);
+                for (const sel of removeSelectors) {{
+                    const els = clone.querySelectorAll(sel);
+                    els.forEach(el => el.remove());
+                }}
+                clone.querySelectorAll('script, style, svg, iframe, noscript').forEach(el => el.remove());
+                return clone.innerHTML;
+            }})()'''
             result = await self.bb_eval(js)
             html = str(result) if isinstance(result, str) else ''
         except Exception:
-            try:
-                result = await self.bb_eval("document.body.innerHTML")
-                html = str(result) if isinstance(result, str) else ''
-            except Exception:
-                pass
+            pass
 
-        return title, content, html
+        return content, html
 
     async def get_bilibili_audio_url(self, bvid: str, cid: int) -> Optional[str]:
         api_url = (
