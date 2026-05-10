@@ -13,6 +13,7 @@ from .cookie_fetcher import CookieFetcher
 from .user_chrome_fetcher import UserChromeFetcher
 from .browser_use_fetcher import BrowserUseFetcher
 from .bb_browser_fetcher import BbBrowserFetcher
+from .scrapling_fetcher import ScraplingFetcher
 
 
 class FetcherFactory:
@@ -37,6 +38,7 @@ class FetcherFactory:
         FetchStrategy.USER_CHROME: UserChromeFetcher,
         FetchStrategy.BROWSER_USE: BrowserUseFetcher,
         FetchStrategy.BB_BROWSER: BbBrowserFetcher,
+        FetchStrategy.SCRAPLING: ScraplingFetcher,
     }
 
     @classmethod
@@ -69,7 +71,15 @@ class FetcherFactory:
         if config.user_data_dir:
             return UserChromeFetcher(config)
 
+        # For generic/unrecognized platforms, try Scrapling before Playwright
+        if platform not in cls._COOKIE_PRIORITY_PLATFORMS and platform not in cls._KNOWN_PLATFORMS:
+            scrapling = ScraplingFetcher(config)
+            if scrapling._available:
+                return scrapling
+
         return PlaywrightFetcher(config)
+
+    _KNOWN_PLATFORMS = {'zhihu', 'bilibili', 'youtube', 'weixin', 'xiaohongshu', 'github'}
 
     _COOKIE_PRIORITY_PLATFORMS = {'zhihu', 'xiaohongshu', 'weixin'}
 

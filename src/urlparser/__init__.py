@@ -120,6 +120,7 @@ try:
     from .fetcher import (
         BaseFetcher, FetchResult, FetchConfig, FetchStrategy,
         PlaywrightFetcher, CookieFetcher, UserChromeFetcher, BrowserUseFetcher,
+        ScraplingFetcher,
         FetcherFactory,
     )
 except ImportError:
@@ -209,6 +210,7 @@ __all__ = [
     'PlaywrightFetcher',
     'CookieFetcher',
     'UserChromeFetcher',
+    'ScraplingFetcher',
     'BrowserUseFetcher',
     'FetcherFactory',
 

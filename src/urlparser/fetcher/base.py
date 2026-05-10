@@ -17,6 +17,7 @@ class FetchStrategy(Enum):
     USER_CHROME = "user_chrome"
     BROWSER_USE = "browser_use"
     BB_BROWSER = "bb_browser"
+    SCRAPLING = "scrapling"
 
 
 @dataclass
