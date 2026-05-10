@@ -443,7 +443,7 @@ class UrlParser:
 
         # Convert raw_html directly to markdown with images in correct positions
         if result.raw_html and content_type == ContentType.ARTICLE:
-            content_from_html = UrlParser._html_to_markdown(result.raw_html, result.url)
+            content_from_html = UrlParser._html_to_markdown(result.raw_html, result.url, platform)
             if content_from_html:
                 result.content = content_from_html
 
@@ -880,13 +880,37 @@ class UrlParser:
             pass
 
     @staticmethod
-    def _html_to_markdown(html: str, base_url: str = '') -> str:
+    def _html_to_markdown(html: str, base_url: str = '', platform: str = '') -> str:
         """
         将 HTML 转换为 Markdown，保持图片位置并进行内容清理
         使用 BeautifulSoup 更准确地解析 HTML
         """
         if not html:
             return ''
+
+        # ---- trafilatura preprocessing for generic/non-known platforms ----
+        # Known platforms have dedicated parsers with platform-aware extraction;
+        # only apply trafilatura to generic/unrecognized pages.
+        _KNOWN_PLATFORMS = {'zhihu', 'bilibili', 'youtube', 'weixin', 'xiaohongshu', 'github'}
+        if platform and platform not in _KNOWN_PLATFORMS:
+            try:
+                import trafilatura
+                # favor_precision=True: prefer cleaner output over recall (per Spec decision protocol)
+                traf_text = trafilatura.extract(
+                    html,
+                    output_format='markdown',
+                    favor_precision=True,
+                    include_formatting=True,
+                    include_links=True,
+                    include_images=True,
+                )
+                if traf_text and len(traf_text.strip()) > 100:
+                    return traf_text
+            except ImportError:
+                pass  # trafilatura not installed; fall through to existing path
+            except Exception:
+                pass  # trafilatura failed for any reason; fall through to existing path
+
         from urllib.parse import urljoin, urlparse, unquote
         from bs4 import BeautifulSoup, Comment
         
