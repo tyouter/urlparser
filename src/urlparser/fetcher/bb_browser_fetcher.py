@@ -357,7 +357,7 @@ class BbBrowserFetcher(BaseFetcher):
             js = f'''(() => {{
                 const removeSelectors = {remove_js};
                 const contentEl = document.querySelector('{selector}');
-                if (!contentEl) return '';
+                if (!contentEl) return document.body ? document.body.innerHTML : '';
                 const clone = contentEl.cloneNode(true);
                 for (const sel of removeSelectors) {{
                     const els = clone.querySelectorAll(sel);
@@ -370,6 +370,13 @@ class BbBrowserFetcher(BaseFetcher):
             html = str(result) if isinstance(result, str) else ''
         except Exception:
             pass
+
+        if not html:
+            try:
+                result = await self.bb_eval("document.body ? document.body.innerHTML : ''")
+                html = str(result) if isinstance(result, str) else ''
+            except Exception:
+                pass
 
         return content, html
 
@@ -525,6 +532,7 @@ class BbBrowserFetcher(BaseFetcher):
 
         title = ''
         text = ''
+        html = ''
         metadata: Dict[str, Any] = {'bb_browser': True}
 
         if 'bvid' in data:
@@ -598,13 +606,27 @@ class BbBrowserFetcher(BaseFetcher):
             content = data.get('content', data.get('text', data.get('description', '')))
             if not content:
                 content = json.dumps(data, ensure_ascii=False, indent=2)
-            text = f"# {title}\n\n{content}" if title else content
+            html = ''
+            # If content looks like HTML, preserve it for further markdown/image processing
+            if isinstance(content, str) and re.search(r'<\w+[^>]*>', content):
+                html = content
+                # Also extract plain text for the text field
+                try:
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(content, 'lxml')
+                    plain = soup.get_text(separator='\n')
+                    text = f"# {title}\n\n{plain}" if title else plain
+                except Exception:
+                    text = f"# {title}\n\n{content}" if title else content
+            else:
+                text = f"# {title}\n\n{content}" if title else content
             metadata['raw_data'] = data
 
         return FetchResult(
             url=url,
             text=text,
             title=title,
+            html=html,
             status_code=200,
             strategy=FetchStrategy.BB_BROWSER,
             success=True,

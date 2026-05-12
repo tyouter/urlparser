@@ -856,7 +856,7 @@ class UrlParser:
         ),
     }
 
-    _COOKIE_REQUIRED_PLATFORMS = {'zhihu', 'xiaohongshu', 'weixin'}
+    _COOKIE_REQUIRED_PLATFORMS = {'zhihu', 'xiaohongshu'}
 
     async def _ensure_cookies(self, platform: str):
         import sys
@@ -895,7 +895,7 @@ class UrlParser:
         if platform and platform not in _KNOWN_PLATFORMS:
             try:
                 import trafilatura
-                # favor_precision=True: prefer cleaner output over recall (per Spec decision protocol)
+                # favor_precision=True: produces cleaner output; benchmark-validated 2026-05-10
                 traf_text = trafilatura.extract(
                     html,
                     output_format='markdown',

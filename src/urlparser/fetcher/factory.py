@@ -71,17 +71,13 @@ class FetcherFactory:
         if config.user_data_dir:
             return UserChromeFetcher(config)
 
-        # For generic/unrecognized platforms, try Scrapling before Playwright
-        if platform not in cls._COOKIE_PRIORITY_PLATFORMS and platform not in cls._KNOWN_PLATFORMS:
-            scrapling = ScraplingFetcher(config)
-            if scrapling._available:
-                return scrapling
-
         return PlaywrightFetcher(config)
 
     _KNOWN_PLATFORMS = {'zhihu', 'bilibili', 'youtube', 'weixin', 'xiaohongshu', 'github'}
 
-    _COOKIE_PRIORITY_PLATFORMS = {'zhihu', 'xiaohongshu', 'weixin'}
+    _COOKIE_PRIORITY_PLATFORMS = {'zhihu', 'xiaohongshu'}
+
+    _NO_AUTO_COOKIES = {'weixin'}
 
     @classmethod
     def auto_select(cls, url: str, config: Optional[FetchConfig] = None) -> BaseFetcher:
@@ -114,20 +110,21 @@ class FetcherFactory:
         if config.cookies_file:
             return CookieFetcher(config)
 
-        cookies_file = cls._try_auto_cookies(url)
-        if cookies_file:
-            config = FetchConfig(
-                timeout=config.timeout,
-                headless=config.headless,
-                compatibility_mode=config.compatibility_mode,
-                scroll_enabled=config.scroll_enabled,
-                max_scrolls=config.max_scrolls,
-                scroll_delay=config.scroll_delay,
-                load_full_content=config.load_full_content,
-                dismiss_popups=config.dismiss_popups,
-                cookies_file=cookies_file,
-            )
-            return CookieFetcher(config)
+        if platform not in cls._NO_AUTO_COOKIES:
+            cookies_file = cls._try_auto_cookies(url)
+            if cookies_file:
+                config = FetchConfig(
+                    timeout=config.timeout,
+                    headless=config.headless,
+                    compatibility_mode=config.compatibility_mode,
+                    scroll_enabled=config.scroll_enabled,
+                    max_scrolls=config.max_scrolls,
+                    scroll_delay=config.scroll_delay,
+                    load_full_content=config.load_full_content,
+                    dismiss_popups=config.dismiss_popups,
+                    cookies_file=cookies_file,
+                )
+                return CookieFetcher(config)
 
         if config.user_data_dir:
             return UserChromeFetcher(config)

@@ -282,8 +282,10 @@ class PlaywrightFetcher(BaseFetcher):
             text = await page.evaluate('''%s
             () => {
                 const contentEl = document.querySelector('#js_content') ||
-                                  document.querySelector('.rich_media_content');
-                if (!contentEl) return '';
+                                  document.querySelector('.rich_media_content') ||
+                                  document.querySelector('.rich_media_area_primary') ||
+                                  document.querySelector('#img-content');
+                if (!contentEl) return document.body ? document.body.innerText : '';
 
                 const clone = contentEl.cloneNode(true);
 
@@ -318,8 +320,10 @@ class PlaywrightFetcher(BaseFetcher):
             html = await page.evaluate('''%s
             () => {
                 const contentEl = document.querySelector('#js_content') ||
-                                  document.querySelector('.rich_media_content');
-                if (!contentEl) return '';
+                                  document.querySelector('.rich_media_content') ||
+                                  document.querySelector('.rich_media_area_primary') ||
+                                  document.querySelector('#img-content');
+                if (!contentEl) return document.body ? document.body.innerHTML : '';
 
                 const clone = contentEl.cloneNode(true);
 
@@ -333,6 +337,9 @@ class PlaywrightFetcher(BaseFetcher):
                 return clone.innerHTML;
             }''' % ('const removeSelectors = ' + remove_js + ';'))
         except Exception:
+            html = await page.content()
+
+        if not html:
             html = await page.content()
 
         return title, text, html
