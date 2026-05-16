@@ -11,7 +11,8 @@
 - **智能内容提取** — 标题、作者、正文、视频元数据
 - **图片下载支持** — 下载网页中的图片到本地，或转换为 Base64 嵌入
 - **自适应浏览器内容访问** — 兼容模式、Cookie 认证、用户浏览器、AI 自动化
-- **视频转录** — FunASR（中文优化）/ Whisper（99 语言）
+- **视频自动转录** — 视频 URL 强制转录，B站 FunASR 优先，其他 FunASR/Whisper
+- **Windows 静默** — 后台子进程不弹 CMD 窗口
 - **双层缓存** — 内存 + 磁盘，避免重复解析
 - **批量处理** — 并发解析，进度追踪
 - **SKILL 集成** — Claude Code / Trae / Hermes 开箱即用，自然语言触发
@@ -83,7 +84,7 @@ hermes skills install tyouter/urlparser
 助手: [自动触发 urlparser Skill，调用 CLI 解析并返回结构化内容]
 
 用户: 把这个B站视频转录一下 https://www.bilibili.com/video/BV1KBZkB6EJF
-助手: [自动触发，带 --transcribe 参数解析]
+助手: [自动触发，视频URL强制转录]
 
 用户: 批量解析这个文件里的所有URL urls.txt
 助手: [自动触发 parse-batch 命令]
@@ -93,12 +94,12 @@ hermes skills install tyouter/urlparser
 
 | 用户意图 | Skill 行为 |
 |---------|-----------|
-| 解析/读取/提取 URL 内容 | `urlparser parse <url>` |
-| 转录视频/音频 | `urlparser parse <url> --transcribe` |
+| 解析/读取/提取 URL 内容 | `python -m urlparser parse <url>` |
+| 转录视频/音频 | `python -m urlparser parse <url>` (自动) |
 | 视频理解（视觉+音频） | `urlparser parse <url> --comprehension audio_video` |
-| 批量解析 | `urlparser parse-batch <file>` |
-| 转录本地文件 | `urlparser transcribe <file>` |
-| 视频元信息 | `urlparser video-info <url>` |
+| 批量解析 | `python -m urlparser parse-batch <file>` |
+| 转录本地文件 | `python -m urlparser transcribe <file>` |
+| 视频元信息 | `python -m urlparser video-info <url>` |
 
 **Cookie 管理**
 
@@ -123,11 +124,8 @@ async def main():
     print(result.title)
     print(result.content)
 
-    # 带视频转录
-    result = await parse(
-        "https://www.bilibili.com/video/BVxxx",
-        enable_transcribe=True
-    )
+    # 视频 URL 自动转录（无需 enable_transcribe）
+    result = await parse("https://www.bilibili.com/video/BVxxx")
     print(result.transcription.text)
     
     # 下载图片
@@ -154,48 +152,51 @@ asyncio.run(main())
 
 ```bash
 # 解析单个 URL
-urlparser parse https://www.zhihu.com/question/xxx
+python -m urlparser parse https://www.zhihu.com/question/xxx
 
 # 输出到文件
-urlparser parse <url> --output result.md
+python -m urlparser parse <url> --output result.md
 
-# 启用转录
-urlparser parse <url> --transcribe
+# 视频自动转录（无需 --transcribe）
+python -m urlparser parse <url>
+
+# 非视频 URL 显式转录
+python -m urlparser parse <url> --transcribe
 
 # 下载图片到本地（配合 --output 使用会自动将图片保存在输出文件同目录下）
-urlparser parse <url> --download-images --output article.md
+python -m urlparser parse <url> --download-images --output article.md
 
 # 图片模式：local（默认，下载到本地）或 base64（嵌入 Markdown）
-urlparser parse <url> --download-images --image-mode base64
+python -m urlparser parse <url> --download-images --image-mode base64
 
 # 自定义图片保存目录
-urlparser parse <url> --download-images --image-dir ./article_images
+python -m urlparser parse <url> --download-images --image-dir ./article_images
 
 # 批量解析
-urlparser parse-batch urls.txt --output-dir ./results
+python -m urlparser parse-batch urls.txt --output-dir ./results
 
 # 缓存管理
-urlparser cache stats
-urlparser cache clear
+python -m urlparser cache stats
+python -m urlparser cache clear
 
 # 视频信息
-urlparser video-info https://www.bilibili.com/video/BVxxx
+python -m urlparser video-info https://www.bilibili.com/video/BVxxx
 
 # 音频转录
-urlparser transcribe audio.mp3 --engine funasr
+python -m urlparser transcribe audio.mp3 --engine funasr
 ```
 
 ## 支持平台
 
 | 平台 | 内容类型 | 特殊处理 |
 |------|---------|---------|
-| 知乎 | 问答/文章 | 自动加载完整内容、处理页面弹窗 |
-| B站 | 视频 | 视频信息、转录支持 |
+| 知乎 | 问答/文章 | Cookie 认证，自动加载完整内容 |
+| B站 | 视频 | **强制 FunASR 转录**，API 直取音频流 |
 | YouTube | 视频 | 多语言转录 |
-| 微信公众号 | 文章 | Cookie 认证 |
+| 微信公众号 | 文章 | Cookie 认证，图片占位符替换 |
 | 小红书 | 笔记 | 访问适配 |
 | GitHub | 仓库/Issue | README/代码提取 |
-| 通用网页 | 文章 | 智能内容提取 |
+| 通用网页 | 文章 | 智能内容提取，视频平台触发转录 |
 
 ## 配置
 
@@ -205,7 +206,7 @@ from urlparser import ParseConfig
 # 简单配置
 config = ParseConfig.simple()
 
-# 带转录
+# 带转录（非视频 URL）
 config = ParseConfig.with_transcribe(engine="funasr")
 
 # 带 Cookie
@@ -317,6 +318,9 @@ results = await parse_batch(
 ```
 
 ## 转录引擎
+
+> **视频 URL 自动强制转录**，无需手动开启。B站走 FunASR API 直取音频流。
+> Windows 下所有子进程通过 `CREATE_NO_WINDOW` 静默运行。
 
 ```python
 from urlparser import FunASRTranscriber, WhisperTranscriber

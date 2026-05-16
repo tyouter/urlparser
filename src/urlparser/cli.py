@@ -10,8 +10,8 @@ urlparser CLI 接口
     # 批量解析（从文件读取 URL）
     python -m urlparser parse-batch urls.txt
 
-    # 解析视频并转录
-    python -m urlparser parse https://www.bilibili.com/video/BVxxx --transcribe
+    # 解析视频（自动转录）
+    python -m urlparser parse https://www.bilibili.com/video/BVxxx
 
     # 使用 Cookie
     python -m urlparser parse https://zhuanlan.zhihu.com/p/xxx --cookies cookies.json

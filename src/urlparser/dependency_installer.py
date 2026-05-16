@@ -5,6 +5,7 @@
 """
 
 import subprocess
+from .utils._subprocess_win import run_nowindow as _run
 import os
 import sys
 import importlib
@@ -155,7 +156,7 @@ def is_ffmpeg_installed() -> Tuple[bool, Optional[str]]:
         ffprobe_cmd = find_ffprobe()
 
         # 检查 ffmpeg
-        result = subprocess.run(
+        result = _run(
             [ffmpeg_cmd, '-version'],
             capture_output=True,
             text=True,
@@ -165,7 +166,7 @@ def is_ffmpeg_installed() -> Tuple[bool, Optional[str]]:
             return False, None
 
         # 检查 ffprobe
-        result2 = subprocess.run(
+        result2 = _run(
             [ffprobe_cmd, '-version'],
             capture_output=True,
             text=True,
@@ -206,7 +207,7 @@ def install_pip_package(package_name: str, extra_packages: Optional[List[str]] =
     logger.info("正在安装: %s", ', '.join(packages))
 
     try:
-        result = subprocess.run(
+        result = _run(
             [sys.executable, "-m", "pip", "install", *packages, "--quiet"],
             capture_output=True,
             text=True,
@@ -239,7 +240,7 @@ def run_post_install_command(command: str) -> bool:
     logger.info("正在执行: %s", command)
     try:
         parts = command.split()
-        result = subprocess.run(
+        result = _run(
             parts,
             capture_output=True,
             text=True,
@@ -265,7 +266,7 @@ def install_ffmpeg_imageio() -> bool:
     """
     try:
         # 先安装 imageio-ffmpeg
-        result = subprocess.run(
+        result = _run(
             [sys.executable, "-m", "pip", "install", "imageio-ffmpeg", "--quiet"],
             capture_output=True,
             text=True,

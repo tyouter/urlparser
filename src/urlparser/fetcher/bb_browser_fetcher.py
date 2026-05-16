@@ -17,7 +17,6 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from .base import BaseFetcher, FetchResult, FetchConfig, FetchStrategy
 
-
 _PLATFORM_ADAPTERS = {
     'bilibili.com': 'bilibili/video',
     'www.bilibili.com': 'bilibili/video',
@@ -57,7 +56,6 @@ _HIGH_SECURITY_DOMAINS = [
     'xiaohongshu.com',
     'mp.weixin.qq.com',
 ]
-
 
 class BbBrowserFetcher(BaseFetcher):
     """
@@ -437,7 +435,7 @@ class BbBrowserFetcher(BaseFetcher):
                 output_path,
             ]
 
-            result = subprocess.run(
+            result = _run(
                 cmd,
                 capture_output=True,
                 timeout=600,

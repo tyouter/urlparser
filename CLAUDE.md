@@ -99,7 +99,7 @@ parse(url) → UrlParser.parse()
   │   │           └─ 默认 → PlaywrightFetcher
   │   │
   │   ├─ Fetcher 成功 + 未被封锁 → ParseResult
-  │   │   └─ 视频且无转录 → _transcribe_audio(url, config, platform)
+  │   │   └─ 视频URL → 强制转录 (无需 --transcribe)
   │   │       ├─ bilibili → _transcribe_bilibili_via_api() (API直取音频流)
   │   │       └─ 其他 → FunASR/Whisper.transcribe_from_url()
   │   │
@@ -176,6 +176,7 @@ python -c "from urlparser.cookies_manager import CookieManager; import asyncio; 
 - **转录单一职责**: VideoParser 仅提取元数据+字幕，转录由 core.py 统一编排，避免重复转录
 - **策略自动降级**: Fetcher 按优先级尝试 (bb-browser → Cookie → UserChrome → Playwright)，失败自动切换
 - **双层缓存**: 内存 (LRU) + 磁盘 (SQLite)，`--no-cache` 跳过
+- **Windows 子进程静默**: 所有 subprocess.run 通过 _subprocess_win.run_nowindow() 添加 CREATE_NO_WINDOW
 - **可选依赖延迟加载**: transcriber/comprehension 模块在 `__init__.py` 中 try/except 导入
 - **环境变量**: `KMP_DUPLICATE_LIB_OK`, `HF_ENDPOINT`, `QWEN_API_KEY`, `DEEPSEEK_API_KEY`
 - **平台检测**: 基于 URL 模式匹配 + ParserRegistry 注册，在 `utils/url_utils.py` 中实现

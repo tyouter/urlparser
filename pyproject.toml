@@ -1,6 +1,6 @@
 [project]
 name = "urlparser"
-version = "3.3.0"
+version = "3.3.1"
 description = "通用 URL 资源解析器 - Python 包 + Claude Code Skill"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -32,6 +32,7 @@ transcribe = [
     "funasr",
     "faster-whisper",
     "torch",
+    "httpx",
 ]
 comprehension = [
     "openvino>=2024.0.0",
@@ -60,9 +61,9 @@ dev = [
 urlparser = "urlparser.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/knowhow/urlparser"
-Documentation = "https://github.com/knowhow/urlparser#readme"
-Repository = "https://github.com/knowhow/urlparser"
+Homepage = "https://github.com/tyouter/urlparser"
+Documentation = "https://github.com/tyouter/urlparser#readme"
+Repository = "https://github.com/tyouter/urlparser"
 
 [build-system]
 requires = ["hatchling"]

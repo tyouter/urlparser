@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
 import subprocess
+from ..utils._subprocess_win import run_nowindow as _run
 import os
 import logging
 
@@ -51,7 +52,7 @@ def convert_audio_for_funasr(input_path: str, output_path: str,
             output_path
         ])
 
-        result = subprocess.run(
+        result = _run(
             cmd,
             capture_output=True,
             timeout=600
@@ -225,7 +226,7 @@ class BaseTranscriber(ABC):
                 ]
 
                 # Use binary mode to avoid Windows encoding issues
-                result = subprocess.run(cmd, capture_output=True, timeout=60)
+                result = _run(cmd, capture_output=True, timeout=60)
 
                 if result.returncode == 0 and Path(temp_audio_file).exists():
                     audio_path = temp_audio_file

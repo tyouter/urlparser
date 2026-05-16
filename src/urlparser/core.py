@@ -528,7 +528,7 @@ class UrlParser:
                             platform, result.title, result.content
                         )
                         if not blocked:
-                            if is_vid and config.transcribe.enabled and result.fetch_success and not result.has_transcription:
+                            if is_vid and result.fetch_success and not result.has_transcription:
                                 result.transcription = await self._transcribe_audio(url, config.transcribe, platform)
                             if is_vid and config.comprehension.enabled and result.fetch_success:
                                 result.comprehension = await self._run_comprehension(
@@ -568,9 +568,9 @@ class UrlParser:
                 result.content_type = ContentType.VIDEO
                 is_vid = True
 
+            # Force transcription for video URLs (unconditional)
             needs_transcription = (
                 is_vid
-                and config.transcribe.enabled
                 and result.fetch_success
                 and not result.has_transcription
             )

@@ -3,6 +3,7 @@
 """
 
 import subprocess
+from ..utils._subprocess_win import run_nowindow as _run
 import re
 import os
 from pathlib import Path
@@ -44,7 +45,7 @@ class FrameExtractor:
         ]
 
         try:
-            result = subprocess.run(
+            result = _run(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -140,7 +141,7 @@ class FrameExtractor:
             output_path
         ]
         try:
-            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            result = _run(cmd, capture_output=True, timeout=30)
             return result.returncode == 0 and os.path.exists(output_path)
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
@@ -155,7 +156,7 @@ class FrameExtractor:
             video_path
         ]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = _run(cmd, capture_output=True, text=True, timeout=10)
             return float(result.stdout.strip())
         except (subprocess.TimeoutExpired, FileNotFoundError, ValueError):
             return 0.0

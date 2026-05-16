@@ -7,6 +7,7 @@ ffmpeg / ffprobe 路径查找
 
 import os
 import subprocess
+from ._subprocess_win import run_nowindow as _run
 from pathlib import Path
 from typing import Optional
 
@@ -29,7 +30,7 @@ def find_ffmpeg() -> str:
 
     # 1. Try system PATH
     try:
-        result = subprocess.run(
+        result = _run(
             ['ffmpeg', '-version'], capture_output=True, timeout=5
         )
         if result.returncode == 0:
@@ -83,7 +84,7 @@ def find_ffprobe() -> str:
 
     # 1. Try system PATH
     try:
-        result = subprocess.run(
+        result = _run(
             ['ffprobe', '-version'], capture_output=True, timeout=5
         )
         if result.returncode == 0:

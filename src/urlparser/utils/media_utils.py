@@ -5,6 +5,7 @@
 """
 
 import subprocess
+from ._subprocess_win import run_nowindow as _run
 import os
 from pathlib import Path
 from typing import Optional, Tuple
@@ -71,7 +72,7 @@ def get_media_duration(path: str) -> float:
             path
         ]
 
-        result = subprocess.run(
+        result = _run(
             cmd,
             capture_output=True,
             text=True,
@@ -91,7 +92,7 @@ def get_media_duration(path: str) -> float:
             path
         ]
 
-        result = subprocess.run(
+        result = _run(
             cmd,
             capture_output=True,
             text=True,
@@ -212,7 +213,7 @@ def extract_audio_segment(video_path: str, start: float, end: float,
             output_path
         ]
 
-        result = subprocess.run(
+        result = _run(
             cmd,
             capture_output=True,
             text=True,
@@ -234,7 +235,7 @@ def check_ffmpeg_available() -> bool:
         ffprobe_cmd = find_ffprobe()
 
         # 检查 ffmpeg
-        result = subprocess.run(
+        result = _run(
             [ffmpeg_cmd, '-version'],
             capture_output=True,
             timeout=5
@@ -243,7 +244,7 @@ def check_ffmpeg_available() -> bool:
             return False
 
         # 检查 ffprobe
-        result = subprocess.run(
+        result = _run(
             [ffprobe_cmd, '-version'],
             capture_output=True,
             timeout=5
