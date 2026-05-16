@@ -136,13 +136,9 @@ def is_package_installed(package_name: str) -> Tuple[bool, Optional[str]]:
         except Exception:
             version = None
         return True, version
-    except ImportError:
-        try:
-            import importlib.metadata as metadata
-            version = metadata.version(package_name)
-            return True, version
-        except Exception:
-            return False, None
+    except Exception:
+        # Catch all (ImportError, OSError for broken DLLs) so any import failure means "not available"
+        return False, None
 
 
 def is_ffmpeg_installed() -> Tuple[bool, Optional[str]]:

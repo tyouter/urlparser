@@ -57,8 +57,9 @@ class BilibiliParser(VideoParser):
                 }
                 return '';
             }''')
-            result['description'] = description or ''
-            result['content'] = description or ''
+            import html
+            result['description'] = html.unescape(description or '')
+            result['content'] = html.unescape(description or '')
         except Exception:
             result['description'] = ''
             result['content'] = ''

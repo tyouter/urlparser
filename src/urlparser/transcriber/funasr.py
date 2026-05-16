@@ -48,7 +48,7 @@ class FunASRTranscriber(BaseTranscriber):
         try:
             import funasr
             return True
-        except ImportError:
+        except Exception:
             return False
 
     @staticmethod

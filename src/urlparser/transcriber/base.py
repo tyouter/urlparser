@@ -136,15 +136,18 @@ class BaseTranscriber(ABC):
                 ydl_opts['format'] = 'bestvideo+bestaudio/best'
                 ydl_opts['outtmpl'] = os.path.join(temp_dir, '%(title)s.%(ext)s')
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                downloaded_file = ydl.prepare_filename(info)
+            import io
+            from contextlib import redirect_stdout
+            with redirect_stdout(io.StringIO()):
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    downloaded_file = ydl.prepare_filename(info)
 
-                if downloaded_file and not Path(downloaded_file).exists():
-                    for f in Path(temp_dir).iterdir():
-                        if f.is_file():
-                            downloaded_file = str(f)
-                            break
+                    if downloaded_file and not Path(downloaded_file).exists():
+                        for f in Path(temp_dir).iterdir():
+                            if f.is_file():
+                                downloaded_file = str(f)
+                                break
 
                 if downloaded_file and Path(downloaded_file).exists():
                     audio_file = downloaded_file

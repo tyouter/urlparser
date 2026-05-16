@@ -413,14 +413,15 @@ class UrlParser:
                 fetch_success=False, error="invalid fetch result type",
             )
 
+        import html
         result = ParseResult(
             url=url,
             platform=platform,
             platform_type=platform_type,
             content_type=content_type,
             title=fr.title or "",
-            content=fr.text or "",
-            raw_text=fr.text or "",
+            content=html.unescape(fr.text or ""),
+            raw_text=html.unescape(fr.text or ""),
             raw_html=fr.html or "",
             metadata=dict(fr.metadata) if fr.metadata else {},
             fetch_success=fr.success,
@@ -599,6 +600,8 @@ class UrlParser:
                 bili_result = await self._transcribe_bilibili_via_api(url, transcribe_config)
                 if bili_result and bili_result.success:
                     return bili_result
+                # B站API路径失败时，降级到通用yt-dlp路径
+
 
             if FunASRTranscriber.is_available():
                 engine = "funasr"
@@ -751,11 +754,15 @@ class UrlParser:
                         model_size=transcribe_config.model_size,
                         device=transcribe_config.device,
                     )
-                else:
+                    engine = "funasr"
+                elif WhisperTranscriber.is_available():
                     transcriber = WhisperTranscriber(
                         model_size=transcribe_config.model_size,
                         device=transcribe_config.device,
                     )
+                    engine = "whisper"
+                else:
+                    return TranscriptionResult(success=False, error="No transcriber available (need FunASR or Whisper)", engine="unknown")
 
                 loop = asyncio.get_event_loop()
                 t_result = await loop.run_in_executor(
@@ -769,7 +776,7 @@ class UrlParser:
                     segments=t_result.segments,
                     language=t_result.language or transcribe_config.language,
                     duration=float(duration),
-                    engine=t_result.engine or "funasr",
+                    engine=t_result.engine or engine,
                     error=t_result.error,
                 )
 

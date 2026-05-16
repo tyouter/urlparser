@@ -358,11 +358,17 @@ class ParseResult:
             lines.append("")
 
         if self.content:
+            import html as _html
             lines.append("## 内容摘要")
-            lines.append(self.content)
+            lines.append(_html.unescape(self.content))
             lines.append("")
 
-        if self.has_transcription:
+        if self.transcription.error:
+            tr = self.transcription
+            lines.append("## 语音转录")
+            lines.append(f"> **转录失败**: {tr.error}")
+            lines.append("")
+        elif self.has_transcription:
             tr = self.transcription
             lines.append("## 语音转录")
             lines.append(f"> 引擎: {tr.engine} | 时长: {tr.duration:.1f}s | 语言: {tr.language}")

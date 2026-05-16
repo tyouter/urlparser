@@ -55,8 +55,11 @@ class YtdlpExtractor(VideoInfoExtractor):
             ydl_opts['getcomments'] = True
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            import io
+            from contextlib import redirect_stdout
+            with redirect_stdout(io.StringIO()):
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
 
                 result = {
                     'url': url,
