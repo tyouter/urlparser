@@ -99,7 +99,8 @@ from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, 
 from .models import (
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult, ArticleMetadata,
-    ComprehensionResult, VisualFrameResult, RetryAttempt,
+    ComprehensionResult, VisualFrameResult, RetryAttempt, ProgressEvent,
+    _emit_progress,
 )
 from .utils import (
     URLNormalizer, normalize_url, hash_url, detect_platform, is_video_url,
@@ -200,6 +201,8 @@ __all__ = [
     'ComprehensionResult',
     'VisualFrameResult',
     'RetryAttempt',
+    'ProgressEvent',
+    '_emit_progress',
 
     'ImageDownloader',
 

@@ -83,6 +83,7 @@ def _add_parse_parser(subparsers):
     p.add_argument('--format', '-f', default='markdown', choices=['markdown', 'json'], help='输出格式')
     p.add_argument('--no-cache', action='store_true', help='跳过缓存')
     p.add_argument('--parse-mode', default='local', choices=['local', 'online'], help='解析模式：local=yt-dlp+浏览器, online=LLM API')
+    p.add_argument('--progress', action='store_true', help='输出结构化进度事件到 stderr（JSON lines 格式）')
     p.add_argument('--comprehension', '-c', choices=['audio', 'video', 'audio_video'],
                    help='视频理解模式')
     p.add_argument('--comp-engine', default='auto',
@@ -230,6 +231,16 @@ async def cmd_parse(args):
             image_dir=args.image_dir,
         )
 
+    # Structured progress output to stderr (JSON-lines for watchdog consumption)
+    on_progress = None
+    if args.progress:
+        import sys
+        def _progress_to_stderr(event):
+            """Write structured progress event as JSON line to stderr."""
+            line = event.to_json_line()
+            print(line, file=sys.stderr, flush=True)
+        on_progress = _progress_to_stderr
+
     config = ParseConfig(
         transcribe=TranscribeConfig(
             enabled=args.transcribe,
@@ -244,6 +255,7 @@ async def cmd_parse(args):
         parse_mode=args.parse_mode,
         comprehension=comp_config or ComprehensionConfig(),
         image_download=img_config or ImageDownloadConfig(),
+        on_progress=on_progress,
     )
 
     async with UrlParser(config) as parser:

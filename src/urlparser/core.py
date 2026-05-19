@@ -15,10 +15,10 @@ from .config import ParseConfig
 from .models import (
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult, RetryAttempt,
-    create_result_from_parser,
-)
+    create_result_from_parser, ProgressEvent,
+)   # noqa
 from .parser import ParserFactory
-from .parser.mixins.content_quality import ContentQualityMixin
+from .parser.mixins.content_quality import ContentQualityMixin; from .models import _emit_progress  # noqa
 from .transcriber import FunASRTranscriber, WhisperTranscriber
 from .utils import detect_platform, is_video_url
 from .comprehension import ComprehensionPipeline
@@ -249,7 +249,7 @@ class UrlParser:
 
                     # Run transcription/comprehension if video
                     if is_vid and config.transcribe.enabled and candidate.fetch_success and not candidate.has_transcription:
-                        candidate.transcription = await self._transcribe_audio(url, config.transcribe, platform)
+                        candidate.transcription = await self._transcribe_audio(url, config.transcribe, platform, config.on_progress)
                     if is_vid and config.comprehension.enabled and candidate.fetch_success:
                         candidate.comprehension = await self._run_comprehension(
                             url, config.comprehension, candidate.transcription
@@ -529,7 +529,7 @@ class UrlParser:
                         )
                         if not blocked:
                             if is_vid and result.fetch_success and not result.has_transcription:
-                                result.transcription = await self._transcribe_audio(url, config.transcribe, platform)
+                                result.transcription = await self._transcribe_audio(url, config.transcribe, platform, config.on_progress)
                             if is_vid and config.comprehension.enabled and result.fetch_success:
                                 result.comprehension = await self._run_comprehension(
                                     url, config.comprehension, result.transcription
@@ -575,7 +575,7 @@ class UrlParser:
                 and not result.has_transcription
             )
             if needs_transcription:
-                result.transcription = await self._transcribe_audio(url, config.transcribe, platform)
+                result.transcription = await self._transcribe_audio(url, config.transcribe, platform, config.on_progress)
 
             if is_vid and config.comprehension.enabled and result.fetch_success:
                 comprehension = await self._run_comprehension(
@@ -588,7 +588,8 @@ class UrlParser:
         finally:
             await parser.close()
 
-    async def _transcribe_audio(self, url: str, transcribe_config, platform: str = "") -> TranscriptionResult:
+    async def _transcribe_audio(self, url: str, transcribe_config,
+                                platform: str = "", on_progress=None) -> TranscriptionResult:
         """音频转录 - B站优先走API直取音频流，其他走通用路径"""
         try:
             from .dependency_installer import ensure_transcribe_dependencies
@@ -603,18 +604,18 @@ class UrlParser:
                 # B站API路径失败时，降级到通用yt-dlp路径
 
 
-            if FunASRTranscriber.is_available():
-                engine = "funasr"
-                transcriber = FunASRTranscriber(
-                    model_size=transcribe_config.model_size,
-                    device=transcribe_config.device,
+            if not FunASRTranscriber.is_available():
+                return TranscriptionResult(
+                    success=False,
+                    error="FunASR transcription engine not available (install via: pip install funasr modelscope)",
+                    engine="unavailable",
                 )
-            else:
-                engine = "whisper"
-                transcriber = WhisperTranscriber(
-                    model_size=transcribe_config.model_size,
-                    device=transcribe_config.device,
-                )
+            transcriber = FunASRTranscriber(
+                model_size=transcribe_config.model_size,
+                device=transcribe_config.device,
+            )
+            transcriber.set_progress_callback(on_progress)
+            engine = "funasr"
 
             loop = asyncio.get_event_loop()
             t_result = await loop.run_in_executor(
@@ -749,20 +750,14 @@ class UrlParser:
                 if not convert_audio_for_funasr(raw_audio, wav_audio):
                     return TranscriptionResult(success=False, error="Audio conversion failed", engine="funasr")
 
-                if FunASRTranscriber.is_available():
-                    transcriber = FunASRTranscriber(
+                if not FunASRTranscriber.is_available():
+                    return TranscriptionResult(success=False, error="FunASR unavailable (needed for transcription)", engine="unavailable")
+                transcriber = FunASRTranscriber(
                         model_size=transcribe_config.model_size,
                         device=transcribe_config.device,
                     )
-                    engine = "funasr"
-                elif WhisperTranscriber.is_available():
-                    transcriber = WhisperTranscriber(
-                        model_size=transcribe_config.model_size,
-                        device=transcribe_config.device,
-                    )
-                    engine = "whisper"
-                else:
-                    return TranscriptionResult(success=False, error="No transcriber available (need FunASR or Whisper)", engine="unknown")
+                transcriber.set_progress_callback(getattr(self.config, 'on_progress', None))
+                engine = "funasr"
 
                 loop = asyncio.get_event_loop()
                 t_result = await loop.run_in_executor(

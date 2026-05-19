@@ -1,13 +1,15 @@
 """
 统一数据模型
 
-整合解析结果 + 转录结果 + 元数据
+整合解析结果 + 转录结果 + 元数据 + 进度事件
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 from enum import Enum
 from datetime import datetime
+import time
+import json
 
 
 class PlatformType(Enum):
@@ -481,3 +483,69 @@ def create_result_from_parser(parser_result) -> ParseResult:
             result.metadata['needs_transcription'] = True
 
     return result
+
+
+@dataclass
+class ProgressEvent:
+    """
+    结构化进度事件
+
+    供看门狗程序通过 on_progress 回调或 stderr JSON-lines 消费。
+    每个处理阶段（fetch/parse/transcribe/comprehension）的
+    开始/进行中/完成 都会触发一次事件。
+
+    使用方式:
+        def my_handler(event: ProgressEvent):
+            print(f"[{event.stage}/{event.phase}] {event.percentage:.0f}% {event.message}")
+
+        config = ParseConfig(on_progress=my_handler)
+    """
+    stage: str = ""            # fetch | parse | transcribe | comprehension
+    phase: str = ""            # start | progress | done | error
+    step: int = 0              # 当前步骤号 (1-based)
+    total_steps: int = 0       # 总步骤数
+    elapsed_sec: float = 0.0   # 当前阶段已耗时
+    eta_sec: float = 0.0       # 预计剩余时间
+    message: str = ""          # 人类可读描述
+    percentage: float = 0.0    # 0-100 进度百分比
+    extra: dict = field(default_factory=dict)  # 阶段特有数据
+
+    def to_json_line(self) -> str:
+        """输出为单行 JSON（适合 stderr 输出）"""
+        d = {
+            'stage': self.stage,
+            'phase': self.phase,
+            'step': self.step,
+            'total_steps': self.total_steps,
+            'elapsed_sec': round(self.elapsed_sec, 2),
+            'eta_sec': round(self.eta_sec, 2),
+            'message': self.message,
+            'percentage': round(self.percentage, 1),
+        }
+        if self.extra:
+            d['extra'] = self.extra
+        return json.dumps(d, ensure_ascii=False)
+
+    def copy(self, **overrides) -> 'ProgressEvent':
+        """创建副本并覆盖指定字段"""
+        return ProgressEvent(
+            stage=overrides.get('stage', self.stage),
+            phase=overrides.get('phase', self.phase),
+            step=overrides.get('step', self.step),
+            total_steps=overrides.get('total_steps', self.total_steps),
+            elapsed_sec=overrides.get('elapsed_sec', self.elapsed_sec),
+            eta_sec=overrides.get('eta_sec', self.eta_sec),
+            message=overrides.get('message', self.message),
+            percentage=overrides.get('percentage', self.percentage),
+            extra=overrides.get('extra', dict(self.extra)),
+        )
+
+
+def _emit_progress(on_progress, event: ProgressEvent):
+    """安全地调用 on_progress 回调（进度回调不应影响主流程）"""
+    if on_progress is None:
+        return
+    try:
+        on_progress(event)
+    except Exception:
+        pass

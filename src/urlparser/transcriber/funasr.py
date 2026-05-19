@@ -11,9 +11,10 @@ import os
 import gc
 import logging
 import re
+import time
 import tempfile
 import shutil
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Callable
 from pathlib import Path
 
 from .base import BaseTranscriber, TranscriptionResult, convert_audio_for_funasr
@@ -21,8 +22,9 @@ from .base import BaseTranscriber, TranscriptionResult, convert_audio_for_funasr
 logger = logging.getLogger(__name__)
 
 
-MAX_DIRECT_DURATION = 240.0
-SEGMENT_DURATION = 240.0
+# Default segment constants (will be overridden based on device/GPU memory)
+_DEFAULT_MAX_DIRECT_DURATION = 240.0
+_DEFAULT_SEGMENT_DURATION = 240.0
 
 SENSEVOICE_SPECIAL_TOKENS = re.compile(
     r'<\|[^|]*\|>'
@@ -42,6 +44,18 @@ class FunASRTranscriber(BaseTranscriber):
                 device = "cpu"
         self.device = device
         self._model = None
+        self._max_direct_duration = _DEFAULT_MAX_DIRECT_DURATION
+        self._segment_duration = _DEFAULT_SEGMENT_DURATION
+        self._batch_size_s = 300
+        self._gpu_memory_gb = 0.0
+        self._on_progress: Optional[Callable] = None
+
+        # GPU-adaptive tuning
+        if self.device == "cuda":
+            try:
+                self._tune_for_gpu()
+            except Exception:
+                pass  # Fall back to defaults on any error
 
     @staticmethod
     def is_available() -> bool:
@@ -58,6 +72,64 @@ class FunASRTranscriber(BaseTranscriber):
             return "cuda" if torch.cuda.is_available() else "cpu"
         except ImportError:
             return "cpu"
+
+    def _tune_for_gpu(self):
+        """Dynamically tune segment size and batch params based on GPU memory."""
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return
+
+            props = torch.cuda.get_device_properties(0)
+            gpu_mem_gb = props.total_memory / (1024 ** 3)
+            self._gpu_memory_gb = gpu_mem_gb
+            gpu_name = props.name
+
+            # SenseVoice Small ~300MB model + audio features ~3x WAV size
+            # Conservative: 1h 16kHz mono WAV ≈ 115MB → features ≈ 350MB
+            # Total peak per segment: ~650MB + overhead
+            usable_gb = gpu_mem_gb * 0.75  # 75% safety margin
+
+            if usable_gb >= 8.0:
+                self._segment_duration = 600.0   # 10 min per segment
+                self._max_direct_duration = 600.0
+                self._batch_size_s = 600
+            elif usable_gb >= 4.0:
+                self._segment_duration = 360.0   # 6 min per segment
+                self._max_direct_duration = 360.0
+                self._batch_size_s = 450
+            elif usable_gb >= 2.0:
+                self._segment_duration = 360.0   # 6 min (slight bump over default)
+                self._max_direct_duration = 360.0
+                self._batch_size_s = 360
+            # else: stay with defaults (240s / 300 batch)
+
+            logger.info(
+                "[FunASR GPU] %s (%.1fGB usable) → seg=%.0fs, batch=%d",
+                gpu_name, usable_gb,
+                self._segment_duration, self._batch_size_s,
+            )
+        except Exception as e:
+            logger.debug("GPU tuning skipped: %s", e)
+
+    def set_progress_callback(self, on_progress: Optional[Callable]):
+        """Set progress callback for structured progress events."""
+        self._on_progress = on_progress
+
+    def _emit(self, phase: str, step: int, total_steps: int,
+              message: str, percentage: float, extra: dict = None):
+        """Emit a progress event if callback is set."""
+        if self._on_progress is None:
+            return
+        from ..models import ProgressEvent
+        event = ProgressEvent(
+            stage="transcribe", phase=phase, step=step, total_steps=total_steps,
+            elapsed_sec=0, message=message, percentage=percentage, extra=extra or {},
+        )
+        try:
+            self._on_progress(event)
+        except Exception:
+            pass
 
     def _load_model(self):
         if self._model is not None:
@@ -117,7 +189,7 @@ class FunASRTranscriber(BaseTranscriber):
             if duration <= 0:
                 duration = self._estimate_duration_from_wav(actual_path)
 
-            if duration > MAX_DIRECT_DURATION:
+            if duration > self._max_direct_duration:
                 return self._transcribe_segmented(actual_path, duration, language)
 
             return self._do_transcribe(actual_path, language)
@@ -148,7 +220,7 @@ class FunASRTranscriber(BaseTranscriber):
         try:
             result = self._model.generate(
                 input=audio_path,
-                batch_size_s=300,
+                batch_size_s=self._batch_size_s,
             )
 
             if result and len(result) > 0:
@@ -190,19 +262,27 @@ class FunASRTranscriber(BaseTranscriber):
     def _transcribe_segmented(self, audio_path: str, duration: float, language: str = "zh") -> TranscriptionResult:
         from ..utils.media_utils import extract_audio_segment
 
-        num_segments = int(duration / SEGMENT_DURATION) + (1 if duration % SEGMENT_DURATION > 0 else 0)
+        num_segments = int(duration / self._segment_duration) + (1 if duration % self._segment_duration > 0 else 0)
 
-        logger.info("Segmented mode: %.0fs audio, %d segments of %.0fs each", duration, num_segments, SEGMENT_DURATION)
+        logger.info("Segmented mode: %.0fs audio, %d segments of %.0fs each (batch=%d)",
+                    duration, num_segments, self._segment_duration, self._batch_size_s)
+        self._emit("start", 0, num_segments,
+                   f"分段转录 {num_segments} 段 × {self._segment_duration:.0f}s",
+                   0.0,
+                   {"duration": duration, "segments": num_segments,
+                    "seg_duration": self._segment_duration})
 
         all_text = []
         all_segments = []
         temp_dir = tempfile.mkdtemp(prefix='funasr_seg_')
+        seg_files = []  # Track segment files for batch cleanup
+        t_start = time.time()
 
         try:
+            # Phase 1: Extract all segment audio files
             for i in range(num_segments):
-                start = i * SEGMENT_DURATION
-                end = min((i + 1) * SEGMENT_DURATION, duration)
-
+                start = i * self._segment_duration
+                end = min((i + 1) * self._segment_duration, duration)
                 seg_wav = os.path.join(temp_dir, f"seg_{i:04d}.wav")
 
                 convert_audio_for_funasr(audio_path, seg_wav, start, end)
@@ -219,12 +299,37 @@ class FunASRTranscriber(BaseTranscriber):
 
                 if not os.path.exists(seg_wav) or Path(seg_wav).stat().st_size < 1000:
                     logger.warning("Seg %d/%d [%.0fs-%.0fs]: extraction failed, skip", i+1, num_segments, start, end)
+                    seg_files.append(None)
                     continue
 
+                seg_files.append(seg_wav)
                 seg_size_mb = Path(seg_wav).stat().st_size / (1024 * 1024)
-                logger.info("Seg %d/%d [%.0fs-%.0fs] (%.1fMB): transcribing...", i+1, num_segments, start, end, seg_size_mb)
+                extraction_pct = (i + 1) / num_segments * 15  # Extraction is ~15% of total
+                self._emit("progress", i + 1, num_segments,
+                          f"音频提取 [{i+1}/{num_segments}] {start:.0f}s-{end:.0f}s ({seg_size_mb:.1f}MB)",
+                          extraction_pct,
+                          {"sub_phase": "extraction", "seg_index": i,
+                           "start": start, "end": end, "size_mb": seg_size_mb})
 
-                result = self._do_transcribe(seg_wav, language)
+            # Phase 2: Batch transcribe all segments (GPU reuse, no gc between)
+            for i in range(num_segments):
+                start = i * self._segment_duration
+                end = min((i + 1) * self._segment_duration, duration)
+                seg_file = seg_files[i]
+
+                if seg_file is None:
+                    logger.warning("Seg %d/%d [%.0fs-%.0fs]: extraction failed, skip", i+1, num_segments, start, end)
+                    continue
+
+                seg_size_mb = Path(seg_file).stat().st_size / (1024 * 1024)
+                base_pct = 15 + 85 * (i / max(num_segments, 1))
+                self._emit("progress", i + 1, num_segments,
+                          f"转录 [{i+1}/{num_segments}] {start:.0f}s-{end:.0f}s ({seg_size_mb:.1f}MB)",
+                          base_pct,
+                          {"sub_phase": "transcribe", "seg_index": i,
+                           "start": start, "end": end, "size_mb": seg_size_mb})
+
+                result = self._do_transcribe(seg_file, language)
 
                 if result.success and result.text:
                     all_text.append(result.text)
@@ -241,18 +346,26 @@ class FunASRTranscriber(BaseTranscriber):
                 else:
                     logger.warning("Seg %d/%d: FAIL - %s", i+1, num_segments, result.error)
 
-                try:
-                    os.unlink(seg_wav)
-                except Exception:
-                    pass
-
-                gc.collect()
+                # Skip gc.collect() on GPU — PyTorch manages GPU memory natively
+                if self.device != "cuda":
+                    gc.collect()
 
         finally:
+            # Clean up all segment files
+            for sf in seg_files:
+                if sf and os.path.exists(sf):
+                    try:
+                        os.unlink(sf)
+                    except Exception:
+                        pass
             try:
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception:
                 pass
+
+        elapsed = time.time() - t_start
+        logger.info("Segmented transcription done: %d segments in %.1fs (%.0fx realtime)",
+                    len(all_segments), elapsed, duration / elapsed if elapsed > 0 else 0)
 
         merged_text = ''.join(all_text)
 

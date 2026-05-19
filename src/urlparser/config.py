@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable
 from pathlib import Path
 
 
@@ -89,6 +89,7 @@ class ParseConfig:
     scroll: ScrollConfig = field(default_factory=ScrollConfig)
     transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
     comprehension: ComprehensionConfig = field(default_factory=ComprehensionConfig)
+    on_progress: Optional[Callable] = None  # Callable[[ProgressEvent], None]
     image_download: ImageDownloadConfig = field(default_factory=ImageDownloadConfig)
     retry: RetryConfig = field(default_factory=RetryConfig)
 
@@ -102,7 +103,7 @@ class ParseConfig:
         return cls(**kwargs)
 
     @classmethod
-    def with_transcribe(cls, **kwargs):
+    def with_transcribe(cls, **kwargs) -> 'ParseConfig':
         """启用转录的配置"""
         transcribe = TranscribeConfig(enabled=True)
         return cls(transcribe=transcribe, **kwargs)

@@ -1,0 +1,19 @@
+feat: GPU-adaptive transcription, structured progress events, Whisper disabled
+
+GPU acceleration:
+- FunASR dynamic segment sizing based on GPU memory (2-8GB+ four tiers)
+- Parallel segment batch-processing (extract all then batch-infer)
+- GPU path skips gc.collect() (PyTorch native memory management)
+- FFmpeg -hwaccel cuda auto-detect for NVIDIA GPU audio decoding
+
+Structured progress (watchdog-ready):
+- New ProgressEvent model with step/total/percentage/ETA/extra
+- ParseConfig.on_progress callback propagated through core.py + funasr.py
+- CLI --progress flag emits JSON-lines progress events to stderr
+
+Transcript engine:
+- faster-whisper disabled as fallback; FunASR is now the only engine
+- Both _transcribe_audio() and _transcribe_bilibili_via_api() simplified
+
+Fix:
+- url_utils.py: add bilibili.com to fallback domain map (b23.tv was missing)

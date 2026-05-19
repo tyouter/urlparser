@@ -58,6 +58,7 @@ def detect_platform(url: str) -> str:
 
     platform_map = {
         'b23.tv': 'bilibili',
+        'bilibili.com': 'bilibili',
         'youtu.be': 'youtube',
         'xhslink.com': 'xiaohongshu',
         'douyin.com': 'douyin',

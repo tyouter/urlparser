@@ -36,7 +36,27 @@ def convert_audio_for_funasr(input_path: str, output_path: str,
     try:
         ffmpeg_cmd = find_ffmpeg()
 
-        cmd = [ffmpeg_cmd]
+        # Auto-detect NVIDIA GPU for hardware-accelerated decoding
+        use_hwaccel = False
+        try:
+            import subprocess as _sp
+            from ..utils._subprocess_win import run_nowindow as _rnw
+            nvidia_check = _rnw(
+                ["nvidia-smi", "-L"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if nvidia_check.returncode == 0 and "GPU" in nvidia_check.stdout:
+                use_hwaccel = True
+        except Exception:
+            pass
+
+        if use_hwaccel:
+            cmd = [ffmpeg_cmd,
+                   '-hwaccel', 'cuda',
+                   '-hwaccel_output_format', 'cuda']
+        else:
+            cmd = [ffmpeg_cmd]
+
 
         if start is not None:
             cmd.extend(['-ss', str(start)])
