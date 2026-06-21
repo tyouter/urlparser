@@ -643,7 +643,12 @@ class UrlParser:
             )
 
     async def _transcribe_bilibili_via_api(self, url: str, transcribe_config) -> TranscriptionResult:
-        """B站专用转录：通过API直取音频流，比yt-dlp更快更稳"""
+        """B站专用转录：通过API直取音频流，比yt-dlp更快更稳
+
+        优先使用 bb-browser (用户浏览器登录态) 调用 B站 API，
+        避免无 Cookie 请求被 WAF 返回 HTTP 412。
+        bb-browser 不可用时降级到 plain httpx。
+        """
         import re as _re
         import tempfile
         import shutil
@@ -674,6 +679,12 @@ class UrlParser:
 
         bvid = bvid_match.group(1)
 
+        # ── Fast path: try bb-browser (user's Chrome with login cookies) ──
+        bb_result = await self._transcribe_bilibili_via_bb_browser(bvid, transcribe_config)
+        if bb_result is not None:
+            return bb_result
+
+        # ── Fallback: plain httpx (no cookies, may hit WAF 412) ──
         try:
             import httpx
 
@@ -780,6 +791,83 @@ class UrlParser:
 
         except Exception as e:
             return TranscriptionResult(success=False, error=f"Bilibili API error: {str(e)[:200]}", engine="funasr")
+
+    async def _transcribe_bilibili_via_bb_browser(self, bvid: str, transcribe_config) -> Optional[TranscriptionResult]:
+        """尝试通过 bb-browser (用户 Chrome 登录态) 下载 B站 音频并转录
+
+        使用 bb-browser 的 cookie-authenticated HTTP 请求调用 B站 API，
+        避免无 Cookie 请求被 WAF 返回 HTTP 412。
+
+        Returns:
+            TranscriptionResult on success, None if bb-browser unavailable or any step fails.
+            Caller falls back to plain httpx / yt-dlp path when None is returned.
+        """
+        import shutil as _shutil
+        import tempfile as _tempfile
+        from pathlib import Path as _Path
+
+        try:
+            from .fetcher import BbBrowserFetcher
+        except ImportError:
+            return None
+
+        bb = BbBrowserFetcher()
+        if not bb._check_bb_browser():
+            return None
+
+        try:
+            # Step 1: Get cid + duration via view API (cookie-authenticated bb_fetch)
+            view_data = await bb.bb_fetch(
+                f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+            )
+            if not isinstance(view_data, dict) or view_data.get("code") != 0:
+                return None
+
+            v = view_data.get("data", {})
+            cid = v.get("cid", 0)
+            duration = v.get("duration", 0)
+            if not cid or duration < 10:
+                return None
+
+            # Step 2: Download audio via bb-browser (ffmpeg + proper headers)
+            temp_dir = _tempfile.mkdtemp(prefix="bili_bb_audio_")
+            try:
+                wav_audio = str(_Path(temp_dir) / "audio.wav")
+                ok = await bb.download_bilibili_audio(bvid, cid, wav_audio)
+                if not ok:
+                    return None
+
+                # download_bilibili_audio already outputs 16kHz mono WAV → FunASR ready
+
+                # Step 3: Transcribe
+                if not FunASRTranscriber.is_available():
+                    return None
+                transcriber = FunASRTranscriber(
+                    model_size=transcribe_config.model_size,
+                    device=transcribe_config.device,
+                )
+                transcriber.set_progress_callback(getattr(self.config, 'on_progress', None))
+
+                loop = asyncio.get_event_loop()
+                t_result = await loop.run_in_executor(
+                    None,
+                    lambda: transcriber.transcribe(wav_audio, language=transcribe_config.language)
+                )
+
+                return TranscriptionResult(
+                    success=t_result.success,
+                    text=t_result.text,
+                    segments=t_result.segments,
+                    language=t_result.language or transcribe_config.language,
+                    duration=float(duration),
+                    engine=t_result.engine or "funasr",
+                    error=t_result.error,
+                )
+            finally:
+                _shutil.rmtree(temp_dir, ignore_errors=True)
+
+        except Exception:
+            return None
 
     async def _run_comprehension(self, url, comp_config, transcription_result=None):
         """运行视频理解管线"""

@@ -154,6 +154,7 @@ class FunASRTranscriber(BaseTranscriber):
                 device=self.device,
                 disable_update=True,
                 disable_pbar=True,
+
             )
 
         except ImportError:
@@ -221,6 +222,7 @@ class FunASRTranscriber(BaseTranscriber):
             result = self._model.generate(
                 input=audio_path,
                 batch_size_s=self._batch_size_s,
+                use_itn=True,
             )
 
             if result and len(result) > 0:

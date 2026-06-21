@@ -407,18 +407,180 @@ class BbBrowserFetcher(BaseFetcher):
         except Exception:
             return None
 
-    async def download_bilibili_audio(
+    async def _get_cookies_for_bilibili(self) -> Dict[str, str]:
+        """从 bb-browser 获取 bilibili.com 的登录态 Cookie
+
+        先打开 B站首页以确保 Cookie 可用，再通过 eval 提取 document.cookie。
+
+        Returns:
+            Cookie 字典；获取失败返回空字典，调用方降级到 ffmpeg 直连。
+        """
+        try:
+            # 打开 B站首页，保证浏览器有该域名的 Cookie
+            await self._run_exec(['bb-browser', 'open', 'https://www.bilibili.com'])
+            await asyncio.sleep(2)
+
+            cookie_str = await self.bb_eval("document.cookie")
+            if not cookie_str or not isinstance(cookie_str, str) or not cookie_str.strip():
+                return {}
+
+            cookies: Dict[str, str] = {}
+            for item in cookie_str.split(';'):
+                item = item.strip()
+                if '=' in item:
+                    key, value = item.split('=', 1)
+                    cookies[key.strip()] = value.strip()
+            return cookies
+        except Exception:
+            return {}
+
+    async def _download_audio_with_requests(
         self,
-        bvid: str,
-        cid: int,
+        audio_url: str,
         output_path: str,
+        cookies: Dict[str, str],
+        max_retries: int = 3,
     ) -> bool:
-        audio_url = await self.get_bilibili_audio_url(bvid, cid)
-        if not audio_url:
+        """用 Python requests + Cookie 流式下载 m4s 音频，再本地转 WAV。
+
+        指数退避重试：第 1 次重试等 2s，第 2 次等 4s。
+        成功下载后调用 _convert_m4s_to_wav 做本地转码。
+
+        Args:
+            audio_url: B站 CDN 音频流 URL
+            output_path: 最终 WAV 输出路径
+            cookies: 从 bb-browser 提取的 Cookie 字典
+            max_retries: 最大尝试次数（含首次，默认 3）
+
+        Returns:
+            True 如果下载+转码成功
+        """
+        import requests as _requests
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://www.bilibili.com",
+            "Origin": "https://www.bilibili.com",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept-Encoding": "identity",
+            "Range": "bytes=0-",
+            "Connection": "keep-alive",
+        }
+
+        m4s_path = output_path + ".m4s"
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    delay = 2 ** attempt  # 2s, 4s
+                    await asyncio.sleep(delay)
+
+                resp = _requests.get(
+                    audio_url,
+                    headers=headers,
+                    cookies=cookies if cookies else None,
+                    stream=True,
+                    timeout=(30, 300),  # (connect, read)
+                )
+
+                # CDN 514 Frequency Capped → 可重试
+                if resp.status_code == 514:
+                    last_error = RuntimeError(
+                        f"CDN 514 Frequency Capped (attempt {attempt + 1}/{max_retries})"
+                    )
+                    resp.close()
+                    continue
+
+                resp.raise_for_status()
+
+                # 流式写入 m4s
+                with open(m4s_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+
+                resp.close()
+
+                # 校验下载文件
+                if not os.path.exists(m4s_path) or os.path.getsize(m4s_path) == 0:
+                    last_error = RuntimeError("Downloaded m4s file is empty")
+                    continue
+
+                # 本地 ffmpeg 转 WAV
+                if self._convert_m4s_to_wav(m4s_path, output_path):
+                    return True
+
+                last_error = RuntimeError("ffmpeg m4s→WAV conversion failed")
+                continue
+
+            except Exception as e:
+                last_error = e
+                # 清理不完整的下载
+                if os.path.exists(m4s_path):
+                    try:
+                        os.unlink(m4s_path)
+                    except OSError:
+                        pass
+                continue
+
+        # 所有重试耗尽
+        if last_error:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"requests download failed after {max_retries} attempts: {last_error}"
+            )
+        return False
+
+    @staticmethod
+    def _convert_m4s_to_wav(m4s_path: str, wav_path: str) -> bool:
+        """本地 ffmpeg 将 m4s 音频转 16kHz 单声道 WAV。
+
+        因为是本地文件转换（无网络请求），不会触发 CDN 514，
+        也不依赖 Cookie。
+
+        Args:
+            m4s_path: 输入的 .m4s 音频文件
+            wav_path: 输出的 .wav 文件
+
+        Returns:
+            True 如果转换成功且输出文件非空
+        """
+        try:
+            from ..utils._subprocess_win import run_nowindow as _run
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", m4s_path,
+                "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                wav_path,
+            ]
+            result = _run(cmd, capture_output=True, timeout=300)
+            return os.path.exists(wav_path) and os.path.getsize(wav_path) > 0
+        except Exception:
             return False
 
+    async def _download_audio_with_ffmpeg(
+        self,
+        audio_url: str,
+        output_path: str,
+    ) -> bool:
+        """降级方案：ffmpeg 直接下载音频 URL 并转 WAV。
+
+        Args:
+            audio_url: CDN 音频流 URL
+            output_path: WAV 输出路径
+
+        Returns:
+            True 如果成功
+        """
         try:
-            import subprocess
+            from ..utils._subprocess_win import run_nowindow as _run
 
             headers = (
                 "Referer: https://www.bilibili.com\r\n"
@@ -435,16 +597,50 @@ class BbBrowserFetcher(BaseFetcher):
                 output_path,
             ]
 
-            result = _run(
-                cmd,
-                capture_output=True,
-                timeout=600,
-            )
-
+            result = _run(cmd, capture_output=True, timeout=600)
             return os.path.exists(output_path) and os.path.getsize(output_path) > 0
-
         except Exception:
             return False
+
+    async def download_bilibili_audio(
+        self,
+        bvid: str,
+        cid: int,
+        output_path: str,
+    ) -> bool:
+        """下载 B站 视频的音频流并转 16kHz 单声道 WAV。
+
+        策略：
+        1. 首选：bb-browser 提取 Cookie → requests 流式下载 m4s → 本地 ffmpeg 转 WAV
+           - 模拟浏览器播放行为，带指数退避重试（最多 3 次）
+        2. 降级：ffmpeg 直连 CDN 下载（保留原有行为）
+
+        Args:
+            bvid: B站 BV 号
+            cid: 视频分 P 的 cid
+            output_path: 输出 WAV 文件路径
+
+        Returns:
+            True 如果音频下载并转换成功
+        """
+        audio_url = await self.get_bilibili_audio_url(bvid, cid)
+        if not audio_url:
+            return False
+
+        # ── 首选：requests + Cookie 流式下载 ──
+        try:
+            cookies = await self._get_cookies_for_bilibili()
+            if cookies:
+                ok = await self._download_audio_with_requests(
+                    audio_url, output_path, cookies
+                )
+                if ok:
+                    return True
+        except Exception:
+            pass
+
+        # ── 降级：ffmpeg 直连 ──
+        return await self._download_audio_with_ffmpeg(audio_url, output_path)
 
     @staticmethod
     def _extract_adapter_and_args(url: str) -> Optional[Tuple[str, List[str]]]:
