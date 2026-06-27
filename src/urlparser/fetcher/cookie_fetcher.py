@@ -30,6 +30,26 @@ class CookieFetcher(PlaywrightFetcher):
     def __init__(self, config: Optional[FetchConfig] = None):
         super().__init__(config)
         self._cookies_cache: Dict[str, List[Dict]] = {}
+        self._pending_storage_state: Optional[dict] = None
+
+    def _load_storage_state(self, path: str) -> Optional[dict]:
+        """Try to load a Playwright storageState JSON file.
+
+        Returns dict with 'cookies' and 'origins' keys if the file is a valid
+        storageState; returns None if the file does not exist or is not in
+        storageState format (so the caller should fall back to add_cookies).
+        """
+        cookies_path = Path(path)
+        if not cookies_path.exists():
+            return None
+        try:
+            with open(cookies_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and 'origins' in data:
+                return data
+        except Exception:
+            pass
+        return None
 
     async def _load_cookies(self, cookies_file: str) -> List[Dict]:
         if cookies_file in self._cookies_cache:
@@ -47,7 +67,12 @@ class CookieFetcher(PlaywrightFetcher):
         elif content.startswith('#') or '\t' in content:
             cookies = self._parse_netscape_cookies(content)
         else:
-            cookies = json.loads(content)
+            data = json.loads(content)
+            if isinstance(data, dict) and 'cookies' in data:
+                # storageState format: extract cookies list from dict
+                cookies = data['cookies']
+            else:
+                cookies = data
 
         playwright_cookies = []
         for cookie in cookies:
@@ -89,10 +114,28 @@ class CookieFetcher(PlaywrightFetcher):
         return cookies
 
     async def _ensure_browser(self):
+        # If the cookie file is a Playwright storageState (contains origins),
+        # use it to seed the browser context directly (preserves indexedDB /
+        # localStorage, which some platforms like xiaohongshu need).
+        cookies_file = self.config.cookies_file
+        if cookies_file:
+            storage_state = self._load_storage_state(cookies_file)
+            # Also check for a sibling _storage.json (created by login_via_qr.py)
+            # e.g. xiaohongshu_cookies.json → xiaohongshu_storage.json
+            if storage_state is None:
+                cp = Path(cookies_file)
+                sibling_storage = cp.with_name(cp.stem.replace('_cookies', '_storage') + '.json')
+                storage_state = self._load_storage_state(str(sibling_storage))
+            if storage_state is not None:
+                self._pending_storage_state = storage_state
+                await super()._ensure_browser()
+                return
+
+        # Fallback: plain cookie list
         await super()._ensure_browser()
-        if self.config.cookies_file and self._context:
+        if cookies_file and self._context:
             try:
-                cookies = await self._load_cookies(self.config.cookies_file)
+                cookies = await self._load_cookies(cookies_file)
                 if cookies:
                     await self._context.add_cookies(cookies)
             except Exception:
@@ -100,7 +143,9 @@ class CookieFetcher(PlaywrightFetcher):
 
     async def fetch(self, url: str, **kwargs) -> FetchResult:
         cookies_file = kwargs.get('cookies_file', self.config.cookies_file)
-        if cookies_file and self._context:
+        # Only add cookies via add_cookies() if we didn't already seed the
+        # context with a full storageState in _ensure_browser().
+        if cookies_file and self._context and self._pending_storage_state is None:
             try:
                 cookies = await self._load_cookies(cookies_file)
                 if cookies:
