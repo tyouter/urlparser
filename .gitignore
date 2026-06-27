@@ -111,4 +111,9 @@ models/
 
 
 # claude
+.claude/settings.json
 .claude/settings.local.json
+.claude/brief_*.md
+
+# Hermes dev scaffold (local only, not part of urlparser)
+reasonix.toml
