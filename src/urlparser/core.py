@@ -42,6 +42,12 @@ class UrlParser:
 
     def __init__(self, config: Optional[ParseConfig] = None):
         self.config = config or ParseConfig()
+        # 同步 cookie 过期阈值到 CookieManager（全局生效）
+        try:
+            from .cookies_manager import CookieManager
+            CookieManager.configure_max_age(self.config.browser.cookie_max_age_hours)
+        except Exception:
+            pass
         self._fetcher = None
         self._transcriber = None
         self._cache = None
@@ -356,7 +362,7 @@ class UrlParser:
             mgr = CookieManager()
             cookies_path = mgr.get_cookies_path(platform)
             if not mgr._is_valid(cookies_path):
-                mgr._refresh_from_browser(platform)
+                await mgr.refresh_from_profile(platform)
             if cookies_path.exists():
                 cookies_file = str(cookies_path)
 
@@ -949,20 +955,25 @@ class UrlParser:
     _COOKIE_REQUIRED_PLATFORMS = {'zhihu', 'xiaohongshu'}
 
     async def _ensure_cookies(self, platform: str):
-        import sys
-        if platform not in self._COOKIE_REQUIRED_PLATFORMS:
+        if not self.config.browser.cookie_auto_refresh:
             return
+        import sys
         from .cookies_manager import CookieManager
         mgr = CookieManager()
         cookies_path = mgr.get_cookies_path(platform)
+        profile_path = mgr.get_profile_path(platform)
+        # 仅对"曾用过 cookie 的平台"（有 cookie 文件或持久 profile）做前置检查
+        if not cookies_path.exists() and not profile_path.exists():
+            return
         if mgr._is_valid(cookies_path):
             return
+        # 无扫码从持久化 profile 刷新
+        if await mgr.refresh_from_profile(platform):
+            return
+        # session 失效：有交互终端才弹窗重登（写入持久 profile）
         if not sys.stdin.isatty():
             return
-        refreshed = mgr._refresh_from_browser(platform)
-        if refreshed:
-            return
-        print(f"\n[Cookie 检查] 检测到 {platform} 无有效 cookie，正在打开浏览器登录...")
+        print(f"\n[Cookie 检查] 检测到 {platform} cookie 过期，正在打开浏览器登录...")
         print("请在浏览器中完成登录，然后回到终端按 Enter 继续。")
         try:
             await mgr.interactive_login(platform)
@@ -1247,12 +1258,24 @@ class UrlParser:
         return self._LOGIN_HINTS.get(platform, '')
 
     async def _try_interactive_login(self, platform: str) -> bool:
+        import sys
         from .cookies_manager import CookieManager, PLATFORM_DOMAINS
         if platform not in PLATFORM_DOMAINS:
             return False
         mgr = CookieManager()
+        # 优先无扫码从持久化 profile 刷新
+        if await mgr.refresh_from_profile(platform):
+            return True
         cookies_path = mgr.get_cookies_path(platform)
-        return mgr._is_valid(cookies_path)
+        if mgr._is_valid(cookies_path):
+            return True
+        # session 失效：有交互终端则弹窗重登（写入持久 profile）
+        if sys.stdin.isatty():
+            try:
+                return await mgr.interactive_login(platform)
+            except Exception:
+                return False
+        return False
 
     async def _retry_with_saved_cookies(
         self, url: str, platform: str,

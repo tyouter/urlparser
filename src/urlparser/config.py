@@ -30,6 +30,8 @@ class BrowserConfig:
     headless: bool = True
     timeout: int = 30000
     compatibility_mode: bool = True
+    cookie_max_age_hours: int = 168        # cookie 有效期（小时），超过视为过期
+    cookie_auto_refresh: bool = True       # 过期时是否自动从持久 profile 刷新
 
 
 @dataclass

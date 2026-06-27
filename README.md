@@ -103,14 +103,18 @@ hermes skills install tyouter/urlparser
 
 **Cookie 管理**
 
-首次解析需要登录的平台（知乎、小红书、微信）时，urlparser 会自动检测 Cookie 状态，若缺失则提示交互式登录：
+需要登录的平台（知乎、小红书、B站、微信、GitHub 等）登录一次即可，登录态写入**持久化浏览器 profile**（`~/.urlparser/profiles/<平台>/`）：
 
 ```bash
-# 手动管理 Cookie
-python -c "from urlparser.cookies_manager import CookieManager; import asyncio; asyncio.run(CookieManager().interactive_login('zhihu'))"
+# 交互式登录（扫码），登录态持久化到 profile
+python -m urlparser.cookies_manager login zhihu
+python -m urlparser.cookies_manager login bilibili
+
+# 查看各平台 Cookie 状态
+python -m urlparser.cookies_manager status
 ```
 
-登录一次后 Cookie 会持久化保存，后续解析无需重复登录。
+登录一次后**后续解析无需重复登录**：`parse()` 前自动检测 Cookie，过期（默认 7 天，`BrowserConfig.cookie_max_age_hours` 可调）则无扫码从持久 profile 刷新，仅 session 真失效时才弹窗重登。
 
 ### Python API
 
@@ -247,6 +251,28 @@ from urlparser import FetcherFactory, FetchStrategy
 fetcher = FetcherFactory.create(strategy=FetchStrategy.BROWSER_USE)
 result = await fetcher.fetch(url)
 ```
+
+## 集成建议（Hermes 等上层应用）
+
+Cookie 过期检测与自动刷新是**库内置行为**，挂在 `parse()` 流程里，上层无需自己定时刷新：
+
+```python
+from urlparser import parse
+
+# 自动识别平台 → 用持久 profile → 过期自动无扫码刷新
+result = await parse(url)
+print(result.to_markdown())
+```
+
+| 调用方式 | 适用场景 | 自动刷新 |
+|---------|---------|---------|
+| `await parse(url)` / `parse_sync(url)` | 上层 Python 应用（**推荐**） | ✅ |
+| 复用 `UrlParser()` 实例 | 批量解析（共享缓存） | ✅ |
+| CLI `python -m urlparser parse` | 进程隔离 / 队列解耦 | ✅ |
+
+> 只有**绕过 `parse()` 直接调 fetcher** 才会错过自动刷新，一般不用。
+>
+> **Hermes 集成**：`pip install -e .` 后 agent 直接 `await parse(url)` 即自动用上 profile 与自动刷新；旧 `parse_watcher` 的定时刷 Cookie（依赖已失效的 `browser_cookie3`）不再需要，库内按需自动刷新已取代它。
 
 ## 数据模型
 

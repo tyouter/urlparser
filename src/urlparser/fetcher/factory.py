@@ -147,9 +147,9 @@ class FetcherFactory:
             platform = detect_platform(url)
             mgr = CookieManager()
             cookies_path = mgr.get_cookies_path(platform)
-            if not mgr._is_valid(cookies_path):
-                mgr._refresh_from_browser(platform)
-            if cookies_path.exists():
+            # 仅当 cookie 有效才注入；过期/失效时返回 None 走无 cookie 降级，
+            # 避免静默注入过期 cookie（refresh 已由 core._ensure_cookies 统一处理）
+            if mgr._is_valid(cookies_path):
                 return str(cookies_path)
         except Exception:
             pass

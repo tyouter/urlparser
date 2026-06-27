@@ -59,10 +59,40 @@ PLATFORM_LOGIN_URLS: Dict[str, str] = {
     "sspai": "https://sspai.com",
 }
 
+PROFILES_DIR = Path(os.path.expanduser("~")) / ".urlparser" / "profiles"
+
+# refresh_from_profile 时 goto 的平台首页（已登录态会在首页体现）
+PLATFORM_HOME_URLS: Dict[str, str] = {
+    "xiaohongshu": "https://www.xiaohongshu.com",
+    "zhihu": "https://www.zhihu.com",
+    "bilibili": "https://www.bilibili.com",
+    "weixin": "https://mp.weixin.qq.com",
+    "youtube": "https://www.youtube.com",
+    "github": "https://github.com",
+    "sspai": "https://sspai.com",
+}
+
+# 判定平台 session 是否存活的登录态 cookie 字段（命中任一即视为已登录）
+# 仅取"登录态独有"字段；a1/logged_in 这类访客也有的不能用作判定，否则会把访客误判为已登录
+_LOGIN_COOKIE_KEYS: Dict[str, List[str]] = {
+    "xiaohongshu": ["web_session"],
+    "zhihu": ["z_c0"],
+    "bilibili": ["SESSDATA", "DedeUserID"],
+    "youtube": ["SAPISID", "SID"],
+    "github": ["user_session"],
+}
+
 _COOKIE_MAX_AGE = 86400 * 7
 
 
 class CookieManager:
+    _max_age_seconds: float = _COOKIE_MAX_AGE  # 可被 configure_max_age 覆盖
+
+    @classmethod
+    def configure_max_age(cls, hours: float):
+        """设置 cookie 过期阈值（小时），全局生效"""
+        cls._max_age_seconds = hours * 3600
+
     def __init__(self, cookies_dir: Optional[str] = None):
         self.cookies_dir = Path(cookies_dir) if cookies_dir else COOKIES_DIR
         self.cookies_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +121,7 @@ class CookieManager:
         try:
             stat = path.stat()
             age = time.time() - stat.st_mtime
-            if age > _COOKIE_MAX_AGE:
+            if age > CookieManager._max_age_seconds:
                 return False
             with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -145,6 +175,101 @@ class CookieManager:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(cookies, f, indent=2, ensure_ascii=False)
 
+    def get_profile_path(self, platform: str) -> Path:
+        return PROFILES_DIR / platform
+
+    def _clear_profile_lock(self, platform: str):
+        """清理 chromium 孤儿锁文件（login/refresh 异常退出后的残留）。
+
+        专用 profile 串行使用前提下安全：避免下次 launch_persistent_context
+        因残留 SingletonLock 启动隔离实例、读不到持久化的登录 cookie。
+        """
+        profile = self.get_profile_path(platform)
+        for lock_name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket'):
+            lock_file = profile / lock_name
+            if lock_file.exists():
+                try:
+                    lock_file.unlink()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _extract_cookies(state: dict) -> List[Dict]:
+        cookies = []
+        for c in state.get('cookies', []):
+            cookies.append({
+                "name": c['name'],
+                "value": c['value'],
+                "domain": c['domain'],
+                "path": c.get('path', '/'),
+                "secure": c.get('secure', False),
+                "httpOnly": c.get('httpOnly', False),
+                "sameSite": c.get('sameSite', 'Lax'),
+                "expires": c.get('expires', -1),
+            })
+        return cookies
+
+    @staticmethod
+    def _has_login_state(platform: str, cookies: List[Dict]) -> bool:
+        keys = _LOGIN_COOKIE_KEYS.get(platform)
+        if not keys:
+            return len(cookies) > 0
+        names = {c.get('name') for c in cookies}
+        return any(k in names for k in keys)
+
+    def _save_storage(self, path: Path, state: dict):
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+
+    async def refresh_from_profile(self, platform: str) -> Optional[List[Dict]]:
+        """从持久化 profile 无扫码读取最新登录态。
+
+        profile 内 session 存活时，headless 重启该 profile，读取 storage_state，
+        判定登录态并导出 cookies/storage 文件。session 失效或无 profile 返回 None。
+        """
+        profile_path = self.get_profile_path(platform)
+        if not profile_path.exists():
+            return None
+        self._clear_profile_lock(platform)
+        home_url = PLATFORM_HOME_URLS.get(platform)
+        if not home_url:
+            return None
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            return None
+
+        try:
+            async with async_playwright() as p:
+                ctx = await p.chromium.launch_persistent_context(
+                    user_data_dir=str(profile_path),
+                    headless=True,
+                    args=['--no-sandbox', '--disable-dev-shm-usage',
+                          '--disable-blink-features=AutomationControlled'],
+                    viewport={'width': 1280, 'height': 800},
+                    locale='zh-CN',
+                )
+                try:
+                    page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+                    try:
+                        await page.goto(home_url, timeout=30000, wait_until='domcontentloaded')
+                    except Exception:
+                        pass
+                    await page.wait_for_timeout(1500)
+                    state = await ctx.storage_state()
+                finally:
+                    await ctx.close()
+        except Exception:
+            return None
+
+        cookies = self._extract_cookies(state)
+        if not self._has_login_state(platform, state.get('cookies', [])):
+            return None
+
+        self._save_file(self.get_cookies_path(platform), cookies)
+        self._save_storage(self.cookies_dir / f"{platform}_storage.json", state)
+        return cookies
+
     async def interactive_login(self, platform: str):
         from playwright.async_api import async_playwright
 
@@ -153,38 +278,35 @@ class CookieManager:
             print(f"Unknown platform: {platform}")
             return False
 
+        profile_path = self.get_profile_path(platform)
+        profile_path.mkdir(parents=True, exist_ok=True)
+        self._clear_profile_lock(platform)
+
         print(f"Opening browser for {platform} login...")
+        print(f"Login state will persist to profile: {profile_path}")
         print(f"Please log in, then press Enter in this terminal when done.")
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
-            ctx = await browser.new_context(
+            ctx = await p.chromium.launch_persistent_context(
+                user_data_dir=str(profile_path),
+                headless=False,
+                args=['--no-sandbox', '--disable-dev-shm-usage',
+                      '--disable-blink-features=AutomationControlled'],
                 viewport={'width': 1280, 'height': 800},
                 locale='zh-CN',
             )
-            page = await ctx.new_page()
+            page = ctx.pages[0] if ctx.pages else await ctx.new_page()
             await page.goto(login_url, timeout=60000, wait_until='domcontentloaded')
 
             await asyncio.get_event_loop().run_in_executor(None, input, "\nPress Enter after login is complete...")
 
             state = await ctx.storage_state()
-            cookies = []
-            for c in state.get('cookies', []):
-                cookies.append({
-                    "name": c['name'],
-                    "value": c['value'],
-                    "domain": c['domain'],
-                    "path": c.get('path', '/'),
-                    "secure": c.get('secure', False),
-                    "httpOnly": c.get('httpOnly', False),
-                    "sameSite": c.get('sameSite', 'Lax'),
-                    "expires": c.get('expires', -1),
-                })
+            await ctx.close()
 
-            await browser.close()
-
+        cookies = self._extract_cookies(state)
         if cookies:
             self._save_file(self.get_cookies_path(platform), cookies)
+            self._save_storage(self.cookies_dir / f"{platform}_storage.json", state)
             print(f"Saved {len(cookies)} cookies to {self.get_cookies_path(platform)}")
             return True
         else:
@@ -192,6 +314,18 @@ class CookieManager:
             return False
 
     def force_refresh(self, platform: str) -> Optional[List[Dict]]:
+        # 优先从持久化 profile 无扫码刷新（CLI 同步入口，asyncio.run 安全）
+        try:
+            result = asyncio.run(self.refresh_from_profile(platform))
+            if result:
+                return result
+        except RuntimeError:
+            # 已在 event loop 中：调用方应直接 await refresh_from_profile
+            pass
+        except Exception:
+            pass
+
+        # fallback: browser_cookie3（本机多数失效，保留兼容）
         cookies_path = self.get_cookies_path(platform)
         backup = None
         if cookies_path.exists():
