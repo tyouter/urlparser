@@ -27,6 +27,7 @@ from playwright.async_api import Page
 
 from ..base import ArticleParser
 from ..models import ParserConfig
+from ...cookies_manager import CookieManager
 
 
 # ── 地支藏干数量 (本/中/余气), 用于把扁平藏干列表按柱分组 ──
@@ -206,8 +207,21 @@ class WenzhenParser(ArticleParser):
         "流年", "大运", "流月",
     })
 
-    def __init__(self, config: Optional[ParserConfig] = None):
+    def __init__(self, config: ParserConfig = None):
         super().__init__(config)
+        self._cookie_manager = CookieManager()
+
+    # ================================================================
+    #  browser with cookie support
+    # ================================================================
+
+    async def _ensure_browser(self):
+        if not self.config.cookies_file:
+            cookies = self._cookie_manager.get_cookies("wenzhen")
+            if cookies:
+                cookies_path = self._cookie_manager.get_cookies_path("wenzhen")
+                self.config.cookies_file = str(cookies_path)
+        await super()._ensure_browser()
 
     # ================================================================
     #  fetch lifecycle

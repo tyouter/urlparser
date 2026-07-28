@@ -47,6 +47,7 @@ PLATFORM_DOMAINS: Dict[str, str] = {
     "youtube": ".youtube.com",
     "github": ".github.com",
     "sspai": ".sspai.com",
+    "wenzhen": ".iwzwh.com",
 }
 
 PLATFORM_LOGIN_URLS: Dict[str, str] = {
@@ -57,6 +58,7 @@ PLATFORM_LOGIN_URLS: Dict[str, str] = {
     "youtube": "https://accounts.google.com/login",
     "github": "https://github.com/login",
     "sspai": "https://sspai.com",
+    "wenzhen": "https://pcbz.iwzwh.com",
 }
 
 PROFILES_DIR = Path(os.path.expanduser("~")) / ".urlparser" / "profiles"
@@ -70,6 +72,7 @@ PLATFORM_HOME_URLS: Dict[str, str] = {
     "youtube": "https://www.youtube.com",
     "github": "https://github.com",
     "sspai": "https://sspai.com",
+    "wenzhen": "https://pcbz.iwzwh.com",
 }
 
 # 判定平台 session 是否存活的登录态 cookie 字段（命中任一即视为已登录）
