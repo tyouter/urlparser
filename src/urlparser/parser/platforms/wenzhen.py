@@ -84,6 +84,9 @@ class WenzhenParser(ArticleParser):
     _DI_ZHI = "子丑寅卯辰巳午未申酉戌亥"
     _SHI_SHEN = "财官印比劫食杀伤枭才"  # 十神单字缩写: 财/官/印/比/劫/食/伤/杀/枭/才
 
+    # ── 大运/流年行 CSS 选择器 (级联点击) ──
+    _YUN_ITEM = "span.pro-pan-yun-item-small"
+
     # ── 24 节气 (流月行锚点) ──
     _SOLAR_TERMS = {
         "立春", "雨水", "惊蛰", "春分", "清明", "谷雨",
@@ -178,15 +181,116 @@ class WenzhenParser(ArticleParser):
     # ================================================================
 
     async def extract_content(self, page: Page) -> Dict:
-        """取全量 innerText, 解析为结构化 markdown."""
+        """默认视图提取 + 大运级联点击提取完整流年.
+
+        流程:
+          1. 取专业细盘默认 innerText → 解析四柱/神煞/大运/默认流年流月 (保底)
+          2. 遍历大运表逐行点击 → 提取每段流年 → 汇总成完整流年表
+          3. 点击失败不中断: 无级联数据时回退默认视图流年
+        """
         text = await page.evaluate("() => document.body.innerText")
-        return self._parse(text or "")
+        text = text or ""
+
+        # 解析大运表 (级联点击的依据)
+        _lines = [ln.strip() for ln in text.split("\n")]
+        _nz = [ln for ln in _lines if ln]
+        dayun_rows = self._parse_dayun(_nz)
+
+        # 级联点击: 遍历大运表提取完整流年
+        segments: List[Tuple[str, List[List[str]]]] = []
+        if dayun_rows:
+            try:
+                segments = await self._cascade_liunian(page, dayun_rows)
+            except Exception:
+                segments = []
+
+        # 渲染: 有级联数据则按大运分段, 否则保底默认视图
+        return self._parse(text, liunian_segments=segments or None)
+
+    # ================================================================
+    #  大运级联点击 (流年全量提取)
+    # ================================================================
+
+    async def _cascade_liunian(
+        self, page: Page, dayun_rows: List[List[str]]
+    ) -> List[Tuple[str, List[List[str]]]]:
+        """遍历大运表, 逐行点击并提取该段流年.
+
+        Returns: [(大运标签, 流年行列表), ...]
+                  标签 e.g. "大运 辛酉（5岁 · 1987年起）" / "1~4岁（1983年起）"
+        """
+        segments: List[Tuple[str, List[List[str]]]] = []
+        for dy_row in dayun_rows:
+            # dy_row = [起运年, 年龄, 大运干支, 十神, 纳音]
+            if len(dy_row) < 2:
+                continue
+            start_year = dy_row[0]
+            age_text = dy_row[1]
+            if not age_text or "岁" not in age_text:
+                continue
+
+            # 点击该大运行; 失败则跳过 (保留默认视图保底, 不中断整体流程)
+            try:
+                clicked = await self._click_dayun_row(page, age_text)
+            except Exception:
+                clicked = False
+            if not clicked:
+                continue
+
+            # 等 DOM 稳定 + 流年表刷新
+            await self._wait_dom_stable(page, timeout_ms=5000)
+            await asyncio.sleep(0.5)
+
+            try:
+                seg_text = await page.evaluate("() => document.body.innerText")
+            except Exception:
+                continue
+            seg_nz = [ln for ln in (s.strip() for s in (seg_text or "").split("\n")) if ln]
+
+            # 沿用现有流年解析逻辑
+            liunian_rows = self._parse_liunian(seg_nz)
+            if not liunian_rows:
+                continue
+
+            ganzhi = dy_row[2] if len(dy_row) > 2 else "—"
+            if ganzhi and ganzhi != "—":
+                label = f"大运 {ganzhi}（{age_text} · {start_year}年起）"
+            else:
+                label = f"{age_text}（{start_year}年起）"
+            segments.append((label, liunian_rows))
+        return segments
+
+    async def _click_dayun_row(self, page: Page, age_text: str) -> bool:
+        """点击指定年龄文本的大运行 (基于 span.pro-pan-yun-item-small)."""
+        try:
+            return await page.evaluate("""([sel, target]) => {
+                const rows = document.querySelectorAll(sel);
+                for (const el of rows) {
+                    if (el.textContent.trim() === target && el.offsetParent !== null) {
+                        el.click(); return true;
+                    }
+                }
+                // 兜底: 即使隐藏也派发 click 事件
+                for (const el of rows) {
+                    if (el.textContent.trim() === target) {
+                        el.dispatchEvent(new Event('click', { bubbles: true }));
+                        return true;
+                    }
+                }
+                return false;
+            }""", [self._YUN_ITEM, age_text])
+        except Exception:
+            return False
 
     # ================================================================
     #  text parser (pure python)
     # ================================================================
 
-    def _parse(self, text: str) -> Dict:
+    def _parse(
+        self,
+        text: str,
+        liunian_segments: Optional[List[Tuple[str, List[List[str]]]]] = None,
+    ) -> Dict:
         # 非空行视图 (保留顺序用于索引)
         lines = [ln.strip() for ln in text.split("\n")]
         nz = [ln for ln in lines if ln]
@@ -229,15 +333,29 @@ class WenzhenParser(ArticleParser):
             ))
             parts.append("")
 
-        # ── 流年 (含小运列) ──
-        liunian_rows = self._parse_liunian(nz)
-        if liunian_rows:
-            parts.append("## 流年\n")
-            parts.append(self._fmt_table(
-                ["年份", "流年干支", "十神", "纳音", "小运干支"],
-                liunian_rows,
-            ))
-            parts.append("")
+        # ── 流年 (默认视图或大运级联全量) ──
+        liunian_rows: List[List[str]] = []
+        if liunian_segments:
+            parts.append(
+                f"## 流年（大运级联 · 全量 {len(liunian_segments)} 段）\n"
+            )
+            for label, seg_rows in liunian_segments:
+                parts.append(f"### {label}\n")
+                parts.append(self._fmt_table(
+                    ["年份", "流年干支", "十神", "纳音", "小运干支"],
+                    seg_rows,
+                ))
+                parts.append("")
+                liunian_rows.extend(seg_rows)
+        else:
+            liunian_rows = self._parse_liunian(nz)
+            if liunian_rows:
+                parts.append("## 流年\n")
+                parts.append(self._fmt_table(
+                    ["年份", "流年干支", "十神", "纳音", "小运干支"],
+                    liunian_rows,
+                ))
+                parts.append("")
 
         # ── 流月 ──
         liuyue_rows = self._parse_liuyue(nz)
@@ -261,6 +379,7 @@ class WenzhenParser(ArticleParser):
         metadata.update(basic_meta)
         metadata["dayun_count"] = len(dayun_rows)
         metadata["liunian_count"] = len(liunian_rows)
+        metadata["liunian_segments"] = len(liunian_segments) if liunian_segments else 0
         metadata["liuyue_count"] = len(liuyue_rows)
         metadata["shensha_count"] = len(shensha)
 
