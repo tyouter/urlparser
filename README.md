@@ -7,7 +7,7 @@
 
 ## 特性
 
-- **自动平台识别** — 支持知乎、B站、YouTube、微信、小红书、GitHub 等
+- **自动平台识别** — 支持知乎、B站、YouTube、微信、小红书、GitHub、问真八字 等
 - **智能内容提取** — 标题、作者、正文、视频元数据
 - **图片下载支持** — 下载网页中的图片到本地，或转换为 Base64 嵌入
 - **自适应浏览器内容访问** — 兼容模式、Cookie 认证、用户浏览器、AI 自动化
@@ -109,6 +109,7 @@ hermes skills install tyouter/urlparser
 # 交互式登录（扫码），登录态持久化到 profile
 python -m urlparser.cookies_manager login zhihu
 python -m urlparser.cookies_manager login bilibili
+python -m urlparser.cookies_manager login wenzhen
 
 # 查看各平台 Cookie 状态
 python -m urlparser.cookies_manager status
@@ -200,6 +201,7 @@ python -m urlparser transcribe audio.mp3 --engine funasr
 | 微信公众号 | 文章 | Cookie 认证，图片占位符替换 |
 | 小红书 | 笔记 | 访问适配 |
 | GitHub | 仓库/Issue | README/代码提取 |
+| 问真八字 (pcbz.iwzwh.com) | 命理排盘 | Parser-First 直通；专业细盘 17 类数据块；大运→流年→流月级联点击全量提取（大运13段·流年127行·流月457节气）；需登录 `python -m urlparser.cookies_manager login wenzhen` |
 | 通用网页 | 文章 | 智能内容提取，视频平台触发转录 |
 
 ## 配置
