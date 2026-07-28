@@ -227,9 +227,29 @@ class WenzhenParser(ArticleParser):
     #  fetch lifecycle
     # ================================================================
 
+    async def _load_local_storage(self) -> dict:
+        """加载问真八字 localStorage 登录态."""
+        try:
+            import json as _json
+            path = self._cookie_manager.get_cookies_path("wenzhen")
+            if path.exists():
+                with open(path, encoding="utf-8") as f:
+                    data = _json.load(f)
+                return data.get("localStorage", {})
+        except Exception:
+            pass
+        return {}
+
     async def _fetch_with_page(self, page: Page, url: str):  # type: ignore[override]
-        """goto → 点专业细盘 → 等 DOM 稳定 → extract_content."""
+        """goto → 注入 localStorage(问真用localStorage非cookie) → 点专业细盘 → extract_content."""
+        storage = self._load_local_storage()
         await page.goto(url, timeout=60000, wait_until="domcontentloaded")
+        if storage:
+            await page.evaluate(
+                "(d) => { for (const [k, v] of Object.entries(d)) { try { localStorage.setItem(k, v); } catch(e) {} } }",
+                storage,
+            )
+            await page.goto(url, timeout=60000, wait_until="domcontentloaded")
         await asyncio.sleep(2.5)
 
         await self._switch_to_professional(page)
