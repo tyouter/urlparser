@@ -22,8 +22,9 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import unquote
 
-from playwright.async_api import Page
+from playwright.async_api import Page, async_playwright
 
 from ..base import ArticleParser
 from ..models import ParserConfig
@@ -171,6 +172,32 @@ _EXTRA_BLOCKS_JS = r"""() => {
 }"""
 
 
+# ── 记录案例页卡片定位脚本 ──
+# 找出每个案例卡片中最深的「阳历/阴历」文本叶节点 (每卡片恰好一个).
+# 点击叶节点 → 事件冒泡到卡片容器上的 @click → 触发 Vue router 跳转.
+# mode='count' 返回叶节点数; mode='click' 点击第 idx 个叶节点.
+_RECORD_CARDS_JS = r"""(arg) => {
+  const mode = arg[0], idx = arg[1];
+  const hasY = function(el) { return /[阳阴]历[:：]/.test(el.textContent || ''); };
+  const all = Array.prototype.slice.call(document.querySelectorAll('*'));
+  const leaves = all.filter(function(el) {
+    if (!hasY(el)) return false;
+    const kids = el.children;
+    for (let i = 0; i < kids.length; i++) { if (hasY(kids[i])) return false; }
+    return true;
+  });
+  if (mode === 'count') return leaves.length;
+  if (mode === 'click') {
+    const t = leaves[idx];
+    if (!t) return false;
+    try { t.scrollIntoView({block: 'center', inline: 'center'}); } catch (e) {}
+    t.click();
+    return true;
+  }
+  return 0;
+}"""
+
+
 class WenzhenParser(ArticleParser):
     """问真八字专业细盘解析器。
 
@@ -179,6 +206,11 @@ class WenzhenParser(ArticleParser):
 
     platform = "wenzhen"
     platform_domains = ["pcbz.iwzwh.com", "iwzwh.com"]
+
+    # ── 记录案例页 (批量 URL 提取) ──
+    _BASE_URL = "https://pcbz.iwzwh.com"
+    _RECORD_HASH = "#/record/index"
+    _RECORD_PAGE_URL = _BASE_URL + "/" + _RECORD_HASH
 
     # ── 字符集 (用于识别干支 / 十神缩写) ──
     _TIAN_GAN = "甲乙丙丁戊己庚辛壬癸"
@@ -212,44 +244,72 @@ class WenzhenParser(ArticleParser):
         self._cookie_manager = CookieManager()
 
     # ================================================================
-    #  browser with cookie support
+    #  browser with persistent profile
     # ================================================================
 
     async def _ensure_browser(self):
-        if not self.config.cookies_file:
-            cookies = self._cookie_manager.get_cookies("wenzhen")
-            if cookies:
-                cookies_path = self._cookie_manager.get_cookies_path("wenzhen")
-                self.config.cookies_file = str(cookies_path)
-        await super()._ensure_browser()
+        """用持久化 profile 启动浏览器.
+
+        问真八字的登录态存在 Chrome profile 里 (localStorage / IndexedDB 等),
+        无法跨新建 context 注入 (新 context 中 wzbz_expires=1970-01-01 会被拒绝),
+        故必须复用同一个持久化 profile —— 与知乎/小红书的持久化 profile 同模式.
+
+        profile 由 ``cookies_manager interactive_login`` 一次性建立:
+
+            python -m urlparser.cookies_manager login wenzhen
+
+        persistent context 没有独立 ``Browser`` 对象, ``self.browser`` 与
+        ``self.context`` 合二为一, 均指向该 ``BrowserContext`` (基类 ``fetch`` /
+        ``parse_all_records`` 通过 ``self.browser.new_page()`` 建页仍可正常工作).
+        """
+        if self.browser is not None:
+            return
+
+        profile_path = self._cookie_manager.get_profile_path("wenzhen")
+        if not profile_path.exists():
+            raise RuntimeError(
+                "问真八字未登录：找不到持久化 profile。\n"
+                "请先在终端执行以下命令完成登录（登录态会持久化到 profile，后续无需重复登录）：\n"
+                "    python -m urlparser.cookies_manager login wenzhen\n"
+                f"profile 路径：{profile_path}"
+            )
+
+        # 清理异常退出残留的 chromium 单例锁, 避免启动隔离实例读不到登录态
+        self._cookie_manager._clear_profile_lock("wenzhen")
+
+        self._playwright = await async_playwright().start()
+
+        use_headless = self.config.headless
+        launch_args = [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled',
+        ]
+        if use_headless:
+            launch_args.append('--headless=new')
+
+        ctx = await self._playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile_path),
+            headless=use_headless,
+            args=launch_args,
+            viewport={'width': 1280, 'height': 800},
+            locale='zh-CN',
+            timezone_id='Asia/Shanghai',
+        )
+        # persistent context: browser / context 合二为一, 不再需要 cookie/localStorage 注入
+        self.browser = ctx
+        self.context = ctx
+
+        if self.config.compatibility_mode:
+            await self._add_compatibility_scripts()
 
     # ================================================================
     #  fetch lifecycle
     # ================================================================
 
-    async def _load_local_storage(self) -> dict:
-        """加载问真八字 localStorage 登录态."""
-        try:
-            import json as _json
-            path = self._cookie_manager.get_cookies_path("wenzhen")
-            if path.exists():
-                with open(path, encoding="utf-8") as f:
-                    data = _json.load(f)
-                return data.get("localStorage", {})
-        except Exception:
-            pass
-        return {}
-
     async def _fetch_with_page(self, page: Page, url: str):  # type: ignore[override]
-        """goto → 注入 localStorage(问真用localStorage非cookie) → 点专业细盘 → extract_content."""
-        storage = self._load_local_storage()
+        """goto → 点专业细盘 → extract_content (登录态由持久化 profile 自带)."""
         await page.goto(url, timeout=60000, wait_until="domcontentloaded")
-        if storage:
-            await page.evaluate(
-                "(d) => { for (const [k, v] of Object.entries(d)) { try { localStorage.setItem(k, v); } catch(e) {} } }",
-                storage,
-            )
-            await page.goto(url, timeout=60000, wait_until="domcontentloaded")
         await asyncio.sleep(2.5)
 
         await self._switch_to_professional(page)
@@ -309,6 +369,183 @@ class WenzhenParser(ArticleParser):
             })""", timeout=timeout_ms)
         except Exception:
             await asyncio.sleep(1.0)
+
+    # ================================================================
+    #  记录案例页 (批量 URL 提取 + 逐个解析)
+    # ================================================================
+
+    async def extract_record_urls(self, page: Page) -> List[str]:
+        """从记录案例页提取所有案例的排盘 URL 列表.
+
+        前置: ``page`` 已导航到记录页 (``#/record/index``); 登录态由持久化 profile
+        自带 (无需注入, 由 ``parse_all_records`` / 调用方负责导航 setup).
+
+        两级降级:
+          1. 直接读取 ``<a href>`` 中含 ``paipan-result`` 的链接
+             (router-link 渲染为 ``<a>``, 无需点击)
+          2. 否则逐个点击案例卡片, 捕获 ``location.href`` 变化构造 URL
+             (Vue ``@click`` 卡片; 点击间自动返回记录页重新渲染列表)
+
+        Returns: 完整排盘 URL 列表; 空页 / 未登录 / 无卡片返回 ``[]``.
+        """
+        # 路径 1: 直接 <a href> (router-link, 最快)
+        direct = await self._extract_record_links_direct(page)
+        if direct:
+            return direct
+        # 路径 2: 点击捕获 (Vue @click)
+        return await self._extract_record_urls_by_clicking(page)
+
+    async def parse_all_records(self) -> List[Dict]:
+        """便利方法: goto 记录页 → 提取 URL → 逐个解析 (复用 ``_fetch_with_page``).
+
+        Returns: ``[{"name": str, "url": str, "parse_result": ParseResult | None}, ...]``;
+                 单个案例解析失败不中断批量 (置 ``parse_result=None`` + ``error``).
+                 记录页为空 / 未登录时返回 ``[]``.
+        """
+        await self._ensure_browser()
+        page = await self.browser.new_page()
+        try:
+            await self._goto_record_page(page)
+            urls = await self.extract_record_urls(page)
+            results: List[Dict] = []
+            for url in urls:
+                entry: Dict = {
+                    "name": self._extract_name_from_url(url),
+                    "url": url,
+                }
+                try:
+                    entry["parse_result"] = await self._fetch_with_page(page, url)
+                except Exception as e:  # 单个失败不中断批量
+                    entry["parse_result"] = None
+                    entry["error"] = str(e)
+                results.append(entry)
+            return results
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
+
+    # ── 记录页导航 / 等待 ──
+
+    async def _goto_record_page(self, page: Page) -> bool:
+        """导航到记录案例页 (登录态由持久化 profile 自带), 等待卡片渲染."""
+        await page.goto(self._RECORD_PAGE_URL, timeout=60000, wait_until="domcontentloaded")
+        await asyncio.sleep(2.0)
+        return await self._wait_record_cards(page)
+
+    async def _wait_record_cards(self, page: Page, timeout_ms: int = 10000) -> bool:
+        """等待记录页出现案例卡片 (以 ``阳历`` / ``阴历`` 文本为锚)."""
+        try:
+            await page.wait_for_function(
+                "() => /[阳阴]历[:：]/.test(document.body.innerText || '')",
+                timeout=timeout_ms,
+            )
+            return True
+        except Exception:
+            return False
+
+    async def _goto_record_hash(self, page: Page) -> None:
+        """从详情页返回记录页 (hash 跳转, 不触发整页刷新, 保留登录态)."""
+        try:
+            await page.evaluate("(h) => { location.hash = h; }", self._RECORD_HASH)
+        except Exception:
+            try:
+                await page.goto(self._RECORD_PAGE_URL, timeout=30000,
+                                wait_until="domcontentloaded")
+            except Exception:
+                pass
+        await asyncio.sleep(1.0)
+
+    # ── 路径 1: 直接 <a href> ──
+
+    async def _extract_record_links_direct(self, page: Page) -> List[str]:
+        """读取页面中所有指向 ``paipan-result`` 的 ``<a href>`` (router-link)."""
+        try:
+            hrefs = await page.evaluate("""() => {
+                const out = [];
+                document.querySelectorAll('a[href]').forEach((a) => {
+                    const h = a.getAttribute('href') || '';
+                    if (h.indexOf('paipan-result') >= 0) out.push(h);
+                });
+                return out;
+            }""")
+        except Exception:
+            hrefs = []
+        urls: List[str] = []
+        seen: set = set()
+        for h in hrefs:
+            full = self._normalize_record_url(h)
+            if full and full not in seen:
+                seen.add(full)
+                urls.append(full)
+        return urls
+
+    # ── 路径 2: 点击卡片捕获 location.href ──
+
+    async def _extract_record_urls_by_clicking(self, page: Page) -> List[str]:
+        """逐个点击案例卡片 (阳历文本叶节点), 捕获导航后的 ``location.href``."""
+        total = await self._count_record_cards(page)
+        if not total:
+            return []
+        urls: List[str] = []
+        seen: set = set()
+        for i in range(total):
+            if not await self._click_record_card(page, i):
+                continue
+            await asyncio.sleep(0.8)  # 等 Vue router 完成 hash 跳转
+            try:
+                href = await page.evaluate("() => location.href || ''")
+            except Exception:
+                href = ""
+            if href and "paipan-result" in href and href not in seen:
+                seen.add(href)
+                urls.append(href)
+            # 返回记录页, 等待卡片列表重新渲染后再点下一个
+            await self._goto_record_hash(page)
+            await self._wait_record_cards(page)
+        return urls
+
+    async def _count_record_cards(self, page: Page) -> int:
+        try:
+            return int(await page.evaluate(_RECORD_CARDS_JS, ["count", 0]) or 0)
+        except Exception:
+            return 0
+
+    async def _click_record_card(self, page: Page, idx: int) -> bool:
+        try:
+            return bool(await page.evaluate(_RECORD_CARDS_JS, ["click", idx]))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _normalize_record_url(href: str) -> str:
+        """把相对 hash/path 规范化为完整 URL."""
+        if not href:
+            return ""
+        if href.startswith("http://") or href.startswith("https://"):
+            return href
+        base = WenzhenParser._BASE_URL
+        if href.startswith("#"):
+            return base + "/" + href
+        if href.startswith("/"):
+            return base + href
+        return base + "/" + href
+
+    @staticmethod
+    def _extract_name_from_url(url: str) -> str:
+        """从排盘 URL 的 query 中取 ``name`` 参数."""
+        if not url or "?" not in url:
+            return ""
+        query = url.split("?", 1)[1]
+        for pair in query.split("&"):
+            if pair.startswith("name="):
+                val = pair[len("name="):]
+                try:
+                    return unquote(val)
+                except Exception:
+                    return val
+        return ""
 
     # ================================================================
     #  content extraction
