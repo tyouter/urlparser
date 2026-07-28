@@ -22,9 +22,9 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import Page, Response, async_playwright
 
 from ..base import ArticleParser
 from ..models import ParserConfig
@@ -169,32 +169,6 @@ _EXTRA_BLOCKS_JS = r"""() => {
   } catch (e) {}
 
   return out;
-}"""
-
-
-# ── 记录案例页卡片定位脚本 ──
-# 找出每个案例卡片中最深的「阳历/阴历」文本叶节点 (每卡片恰好一个).
-# 点击叶节点 → 事件冒泡到卡片容器上的 @click → 触发 Vue router 跳转.
-# mode='count' 返回叶节点数; mode='click' 点击第 idx 个叶节点.
-_RECORD_CARDS_JS = r"""(arg) => {
-  const mode = arg[0], idx = arg[1];
-  const hasY = function(el) { return /[阳阴]历[:：]/.test(el.textContent || ''); };
-  const all = Array.prototype.slice.call(document.querySelectorAll('*'));
-  const leaves = all.filter(function(el) {
-    if (!hasY(el)) return false;
-    const kids = el.children;
-    for (let i = 0; i < kids.length; i++) { if (hasY(kids[i])) return false; }
-    return true;
-  });
-  if (mode === 'count') return leaves.length;
-  if (mode === 'click') {
-    const t = leaves[idx];
-    if (!t) return false;
-    try { t.scrollIntoView({block: 'center', inline: 'center'}); } catch (e) {}
-    t.click();
-    return true;
-  }
-  return 0;
 }"""
 
 
@@ -375,28 +349,74 @@ class WenzhenParser(ArticleParser):
     # ================================================================
 
     async def extract_record_urls(self, page: Page) -> List[str]:
-        """从记录案例页提取所有案例的排盘 URL 列表.
+        """从记录案例页拦截 SubUser2 API, 提取所有案例的排盘 URL 列表.
 
-        前置: ``page`` 已导航到记录页 (``#/record/index``); 登录态由持久化 profile
-        自带 (无需注入, 由 ``parse_all_records`` / 调用方负责导航 setup).
+        原方案 (点击卡片捕获 ``location.href``) 已失效: 卡片不再触发 Vue
+        router 跳转. 改为在打开记录页前挂 ``page.on("response")`` 拦截
+        ``SubUser2`` 接口 —— 该接口一次请求返回全量案例 (实测 173 条),
+        响应结构 ``data.items[*].userList.items``, 每条含 name/sex/solarTime/
+        sunTime/timetype/bz/location/guid/type/xls/unknowhour 等字段.
 
-        两级降级:
-          1. 直接读取 ``<a href>`` 中含 ``paipan-result`` 的链接
-             (router-link 渲染为 ``<a>``, 无需点击)
-          2. 否则逐个点击案例卡片, 捕获 ``location.href`` 变化构造 URL
-             (Vue ``@click`` 卡片; 点击间自动返回记录页重新渲染列表)
+        流程:
+          1. 注册 response 监听 (必须在导航前, 否则错过首次 API 请求)
+          2. 导航到记录页 (``_goto_record_page``), 触发 SubUser2 请求
+          3. 等待监听器捕获响应 (asyncio.Event, 15s 超时)
+          4. 对每条案例调 ``_build_paipan_url`` 拼完整 URL, 去重返回
 
-        Returns: 完整排盘 URL 列表; 空页 / 未登录 / 无卡片返回 ``[]``.
+        登录态由持久化 profile 自带 (无需注入). 监听器用完即注销,
+        重复调用不会在 page 上累积 listener.
+
+        Returns: 完整排盘 URL 列表; 未捕获到 API / 未登录 / 列表为空返回 ``[]``.
         """
-        # 路径 1: 直接 <a href> (router-link, 最快)
-        direct = await self._extract_record_links_direct(page)
-        if direct:
-            return direct
-        # 路径 2: 点击捕获 (Vue @click)
-        return await self._extract_record_urls_by_clicking(page)
+        cases: List[Dict] = []
+        captured = asyncio.Event()
+
+        async def _on_response(resp: Response) -> None:
+            # 只认 SubUser2 接口 (URL 含 subuser2, 大小写不敏感)
+            if captured.is_set() or "subuser2" not in resp.url.lower():
+                return
+            try:
+                body = await resp.json()
+            except Exception:
+                return  # 非 JSON (可能是预检/错误响应), 等待后续真正的案例响应
+            # 命中 SubUser2 JSON 响应即视为已捕获 (含空列表, 避免白等 15s)
+            captured.set()
+            found = WenzhenParser._extract_cases_from_api(body)
+            if found:
+                cases.extend(found)
+
+        def _handler(resp: Response) -> None:
+            asyncio.create_task(_on_response(resp))
+
+        page.on("response", _handler)
+        try:
+            # 监听器先行注册, 再导航触发 SubUser2 请求
+            await self._goto_record_page(page)
+            try:
+                await asyncio.wait_for(captured.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                pass
+        finally:
+            try:
+                page.remove_listener("response", _handler)
+            except Exception:
+                pass
+
+        # 去重构造 URL 列表 (按 URL 字符串去重, 保留首次出现顺序)
+        urls: List[str] = []
+        seen: set = set()
+        for item in cases:
+            url = self._build_paipan_url(item)
+            if url and url not in seen:
+                seen.add(url)
+                urls.append(url)
+        return urls
 
     async def parse_all_records(self) -> List[Dict]:
-        """便利方法: goto 记录页 → 提取 URL → 逐个解析 (复用 ``_fetch_with_page``).
+        """便利方法: 拦截记录页 API 提取 URL → 逐个解析 (复用 ``_fetch_with_page``).
+
+        ``extract_record_urls`` 内部完成记录页导航 + API 拦截, 故无需另调
+        ``_goto_record_page``.
 
         Returns: ``[{"name": str, "url": str, "parse_result": ParseResult | None}, ...]``;
                  单个案例解析失败不中断批量 (置 ``parse_result=None`` + ``error``).
@@ -405,7 +425,6 @@ class WenzhenParser(ArticleParser):
         await self._ensure_browser()
         page = await self.browser.new_page()
         try:
-            await self._goto_record_page(page)
             urls = await self.extract_record_urls(page)
             results: List[Dict] = []
             for url in urls:
@@ -426,97 +445,159 @@ class WenzhenParser(ArticleParser):
             except Exception:
                 pass
 
-    # ── 记录页导航 / 等待 ──
+    # ── 记录页导航 ──
 
     async def _goto_record_page(self, page: Page) -> bool:
-        """导航到记录案例页 (登录态由持久化 profile 自带), 等待卡片渲染."""
+        """导航到记录案例页 (登录态由持久化 profile 自带).
+
+        不再等待 DOM 卡片渲染 —— 案例列表由 ``extract_record_urls`` 的 response
+        监听器直接从 SubUser2 API 捕获. 此处仅 goto + 短暂等待 API 触发返回.
+        """
         await page.goto(self._RECORD_PAGE_URL, timeout=60000, wait_until="domcontentloaded")
-        await asyncio.sleep(2.0)
-        return await self._wait_record_cards(page)
+        await asyncio.sleep(3.0)  # 等待 SubUser2 API 触发并返回
+        return True
 
-    async def _wait_record_cards(self, page: Page, timeout_ms: int = 10000) -> bool:
-        """等待记录页出现案例卡片 (以 ``阳历`` / ``阴历`` 文本为锚)."""
-        try:
-            await page.wait_for_function(
-                "() => /[阳阴]历[:：]/.test(document.body.innerText || '')",
-                timeout=timeout_ms,
-            )
-            return True
-        except Exception:
-            return False
+    # ── API 响应 → 案例 → 排盘 URL ──
 
-    async def _goto_record_hash(self, page: Page) -> None:
-        """从详情页返回记录页 (hash 跳转, 不触发整页刷新, 保留登录态)."""
-        try:
-            await page.evaluate("(h) => { location.hash = h; }", self._RECORD_HASH)
-        except Exception:
-            try:
-                await page.goto(self._RECORD_PAGE_URL, timeout=30000,
-                                wait_until="domcontentloaded")
-            except Exception:
-                pass
-        await asyncio.sleep(1.0)
+    @staticmethod
+    def _extract_cases_from_api(body) -> List[Dict]:
+        """从 SubUser2 响应体提取案例列表.
 
-    # ── 路径 1: 直接 <a href> ──
+        官方路径: ``data.items[*].userList.items`` (记录按分组汇总, 全部展开).
+        若官方路径落空 (字段名漂移), 递归兜底找"最像案例列表"的数组
+        (评分: 头 5 元素中像 case 的个数 + 数组长度).
 
-    async def _extract_record_links_direct(self, page: Page) -> List[str]:
-        """读取页面中所有指向 ``paipan-result`` 的 ``<a href>`` (router-link)."""
-        try:
-            hrefs = await page.evaluate("""() => {
-                const out = [];
-                document.querySelectorAll('a[href]').forEach((a) => {
-                    const h = a.getAttribute('href') || '';
-                    if (h.indexOf('paipan-result') >= 0) out.push(h);
-                });
-                return out;
-            }""")
-        except Exception:
-            hrefs = []
-        urls: List[str] = []
-        seen: set = set()
-        for h in hrefs:
-            full = self._normalize_record_url(h)
-            if full and full not in seen:
-                seen.add(full)
-                urls.append(full)
-        return urls
-
-    # ── 路径 2: 点击卡片捕获 location.href ──
-
-    async def _extract_record_urls_by_clicking(self, page: Page) -> List[str]:
-        """逐个点击案例卡片 (阳历文本叶节点), 捕获导航后的 ``location.href``."""
-        total = await self._count_record_cards(page)
-        if not total:
+        Returns: 案例字典列表; 响应非 dict / 无案例返回 ``[]``.
+        """
+        if not isinstance(body, dict):
             return []
-        urls: List[str] = []
-        seen: set = set()
-        for i in range(total):
-            if not await self._click_record_card(page, i):
-                continue
-            await asyncio.sleep(0.8)  # 等 Vue router 完成 hash 跳转
-            try:
-                href = await page.evaluate("() => location.href || ''")
-            except Exception:
-                href = ""
-            if href and "paipan-result" in href and href not in seen:
-                seen.add(href)
-                urls.append(href)
-            # 返回记录页, 等待卡片列表重新渲染后再点下一个
-            await self._goto_record_hash(page)
-            await self._wait_record_cards(page)
-        return urls
 
-    async def _count_record_cards(self, page: Page) -> int:
-        try:
-            return int(await page.evaluate(_RECORD_CARDS_JS, ["count", 0]) or 0)
-        except Exception:
-            return 0
+        # 官方路径: data.items[*].userList.items
+        cases: List[Dict] = []
+        data = body.get("data")
+        if isinstance(data, dict):
+            items = data.get("items")
+            if isinstance(items, list):
+                for grp in items:
+                    if not isinstance(grp, dict):
+                        continue
+                    user_list = grp.get("userList")
+                    if isinstance(user_list, dict):
+                        inner = user_list.get("items")
+                        if isinstance(inner, list):
+                            cases.extend(c for c in inner if isinstance(c, dict))
+        if cases:
+            return cases
 
-    async def _click_record_card(self, page: Page, idx: int) -> bool:
-        try:
-            return bool(await page.evaluate(_RECORD_CARDS_JS, ["click", idx]))
-        except Exception:
-            return False
+        # 递归兜底: 字段名漂移时仍能捞出案例数组
+        return WenzhenParser._find_case_array(body)
+
+    @staticmethod
+    def _find_case_array(obj) -> List[Dict]:
+        """递归找 JSON 树中最像案例列表的数组.
+
+        "像案例" = dict 且字段数 >=4, 同时含 name + (时间字段 或 bz/guid).
+        评分取头 5 元素中像 case 的个数 (主) 与数组长度 (次) 最高者.
+        """
+        def _is_case(d) -> bool:
+            if not isinstance(d, dict) or len(d) < 4:
+                return False
+            keys = {str(k).lower() for k in d.keys()}
+            has_name = any("name" in k for k in keys)
+            has_time = any(
+                ("solar" in k or "sun" in k or "birth" in k or "lunar" in k)
+                for k in keys
+            )
+            has_bz_or_guid = any((k == "bz" or "guid" in k) for k in keys)
+            return has_name and (has_time or has_bz_or_guid)
+
+        best: List[Dict] = []
+        best_score: Tuple[int, int] = (0, 0)
+
+        def _walk(o) -> None:
+            nonlocal best, best_score
+            if isinstance(o, list):
+                if o and isinstance(o[0], dict):
+                    case_count = sum(1 for x in o[:5] if _is_case(x))
+                    if case_count > 0:
+                        score = (case_count, len(o))
+                        if score > best_score:
+                            best_score = score
+                            best = [x for x in o if isinstance(x, dict)]
+                for x in o:
+                    _walk(x)
+            elif isinstance(o, dict):
+                for v in o.values():
+                    _walk(v)
+
+        _walk(obj)
+        return best
+
+    @staticmethod
+    def _build_paipan_url(item: Dict) -> str:
+        """用 SubUser2 返回的单条案例拼完整排盘 URL.
+
+        URL 格式: ``https://pcbz.iwzwh.com/#/paipan-result/index?{params}``
+        参数映射 (参照 test_api_intercept.py 的已验证映射):
+
+          - name       : item["name"]
+          - sex        : item["sex"]
+          - solarTime  : item["solarTime"] 拆为 y/m/d/h/min (5 个同名重复参数)
+          - sunTime    : item["sunTime"] 拆为 y/m/d/h/min
+          - MRType     : item["timetype"]
+          - tg         : item["bz"] 拆空格取 index 0,2,4,6 (天干)
+          - dz         : item["bz"] 拆空格取 index 1,3,5,7 (地支)
+          - location   : item["location"]
+          - guid       : item["guid"]
+          - typeId     : item["type"]
+          - xls        : item["xls"] (缺省 0)
+          - unknowhour : item["unknowhour"] (缺省 0)
+
+        注: lunarArr 在 API 返回中缺失, 实测 URL 省略后仍可正常排盘, 故不拼.
+        """
+        parts: List[str] = []
+        parts.append("name=" + quote(str(item.get("name", "")), safe=""))
+        parts.append("sex=" + quote(str(item.get("sex", 1)), safe=""))
+        for field in ("solarTime", "sunTime"):
+            for n in WenzhenParser._parse_dt_nums(item.get(field)):
+                parts.append(f"{field}={n}")
+        parts.append("MRType=" + str(item.get("timetype", 0)))
+        tg, dz = WenzhenParser._split_bz(item.get("bz", ""))
+        for g in tg:
+            parts.append("tg=" + quote(g, safe=""))
+        for z in dz:
+            parts.append("dz=" + quote(z, safe=""))
+        parts.append("location=" + quote(str(item.get("location", "")), safe=""))
+        parts.append("guid=" + quote(str(item.get("guid", "")), safe=""))
+        parts.append("typeId=" + str(item.get("type", 0)))
+        parts.append("xls=" + str(item.get("xls", 0)))
+        parts.append("unknowhour=" + str(item.get("unknowhour", 0)))
+        return WenzhenParser._BASE_URL + "/#/paipan-result/index?" + "&".join(parts)
+
+    @staticmethod
+    def _parse_dt_nums(dt) -> List[int]:
+        """``'1987-07-05 12:00:00'`` -> ``[1987, 7, 5, 12, 0]``. 缺位补 0."""
+        if dt is None:
+            return [0, 0, 0, 0, 0]
+        nums = [int(x) for x in re.findall(r"\d+", str(dt))][:5]
+        while len(nums) < 5:
+            nums.append(0)
+        return nums
+
+    @staticmethod
+    def _split_bz(bz) -> Tuple[List[str], List[str]]:
+        """``'丁 卯 丙 午 乙 卯 壬 午'`` -> (['丁','丙','乙','壬'], ['卯','午','卯','午']).
+
+        天干取偶数位 (index 0,2,4,6), 地支取奇数位 (index 1,3,5,7).
+        """
+        if not bz:
+            return [], []
+        toks = [t for t in str(bz).split() if t]
+        tg, dz = [], []
+        for i in range(0, len(toks) - 1, 2):
+            tg.append(toks[i])
+            dz.append(toks[i + 1])
+        return tg, dz
 
     @staticmethod
     def _normalize_record_url(href: str) -> str:
