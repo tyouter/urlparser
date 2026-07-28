@@ -70,6 +70,106 @@ _NAYIN_MAP: Dict[str, str] = {
 }
 
 
+# ── 专业细盘附加块结构化提取脚本 (五行旺衰 / 调候用神 / 宫位 / 六亲社会 / 干支关系逐对) ──
+# 单次 evaluate 采集, 每块独立 try/catch, 选择器缺失静默跳过.
+_EXTRA_BLOCKS_JS = r"""() => {
+  const out = {};
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
+  // 1. 五行旺衰 (.pro-pan-wuxing-item)
+  try {
+    const w = [...document.querySelectorAll('.pro-pan-wuxing-item')]
+      .map((e) => (e.textContent || '').trim()).filter(Boolean);
+    if (w.length) out.wuxing = w;
+  } catch (e) {}
+
+  // 2. 调候用神 (.thys-block)
+  try {
+    const b = document.querySelector('.thys-block');
+    if (b) {
+      const titleEl = b.querySelector('.thys-block-title');
+      const title = clean(titleEl ? titleEl.textContent : '');
+      const tou = [...b.querySelectorAll('.thys-block-tips-text1')]
+        .map((e) => (e.textContent || '').trim())
+        .filter((x) => x && x !== '透' && x !== '藏');
+      const cang = [...b.querySelectorAll('.thys-block-tips-text2')]
+        .map((e) => (e.textContent || '').trim())
+        .filter((x) => x && x !== '透' && x !== '藏');
+      const full = clean(b.textContent);
+      if (title || tou.length || cang.length || full) {
+        out.tiaohou = { title, tou, cang, full };
+      }
+    }
+  } catch (e) {}
+
+  const parseRow = (el) => {
+    const gong = [...el.querySelectorAll('.ganzhi_row_gong span, .ganzhi_row_gong2 span')]
+      .map((e) => (e.textContent || '').trim()).filter(Boolean);
+    const ss = [...el.querySelectorAll('.ganzhi_row_ss')]
+      .map((e) => (e.textContent || '').trim()).filter(Boolean);
+    const gz = [...el.querySelectorAll('.ganzhi_row_gz, .ganzhi_row_gz2')]
+      .map((e) => (e.textContent || '').trim()).filter(Boolean);
+    const ttl = [...el.querySelectorAll('.ganzhi_row_title')]
+      .map((e) => (e.textContent || '').trim()).filter(Boolean);
+    if (gong.length || ss.length || gz.length || ttl.length) {
+      return { gong, ss, gz, title: ttl };
+    }
+    return null;
+  };
+  const parseTab = (wrapper) => {
+    if (!wrapper) return [];
+    const sections = [];
+    let cur = null;
+    const els = wrapper.querySelectorAll('.ganzhi_wrapper_table_title, .ganzhi_row');
+    els.forEach((el) => {
+      if (el.classList.contains('ganzhi_wrapper_table_title')) {
+        cur = { title: (el.textContent || '').trim(), rows: [] };
+        sections.push(cur);
+      } else {
+        const row = parseRow(el);
+        if (row) {
+          if (cur === null) { cur = { title: '', rows: [] }; sections.push(cur); }
+          cur.rows.push(row);
+        }
+      }
+    });
+    return sections;
+  };
+
+  // 3. 宫位映射 (.ganzhi_tab03_wrapper)
+  try {
+    const c = document.querySelector('.ganzhi_tab03_wrapper');
+    if (c) {
+      const sections = parseTab(c);
+      if (sections.length) out.gongwei = { sections, full: clean(c.textContent) };
+    }
+  } catch (e) {}
+
+  // 4. 六亲 / 社会关系 (.ganzhi_tab04_wrapper)
+  try {
+    const c = document.querySelector('.ganzhi_tab04_wrapper');
+    if (c) {
+      const sections = parseTab(c);
+      if (sections.length) out.liuqin = { sections, full: clean(c.textContent) };
+    }
+  } catch (e) {}
+
+  // 5. 干支关系逐对 (.gzchatitem)
+  try {
+    const items = [...document.querySelectorAll('.gzchatitem')].map((el) => {
+      const relEl = el.querySelector('.gzchatitem_relaction');
+      const rel = relEl ? (relEl.textContent || '').trim() : '';
+      const gz = [...el.querySelectorAll('.gzchatitem_gz')]
+        .map((e) => (e.textContent || '').trim()).filter(Boolean);
+      return { rel, gz };
+    }).filter((it) => it.rel || it.gz.length);
+    if (items.length) out.gz_rel = items;
+  } catch (e) {}
+
+  return out;
+}"""
+
+
 class WenzhenParser(ArticleParser):
     """问真八字专业细盘解析器。
 
@@ -204,8 +304,23 @@ class WenzhenParser(ArticleParser):
             except Exception:
                 segments = []
 
+        # 专业细盘结构化 DOM 块 (五行/调候/宫位/六亲/干支关系逐对, 静态不随大运变化)
+        extra = await self._extract_extra_blocks(page)
+
         # 渲染: 有级联数据则按大运分段, 否则保底默认视图
-        return self._parse(text, liunian_segments=segments or None)
+        return self._parse(text, liunian_segments=segments or None, extra=extra)
+
+    async def _extract_extra_blocks(self, page: Page) -> Dict:
+        """提取专业细盘 5 个结构化 DOM 块 (单次 evaluate, 选择器缺失静默跳过).
+
+        块: 五行旺衰 / 调候用神 / 宫位映射 / 六亲社会关系 / 干支关系逐对.
+        均为静态 DOM, 不随大运级联变化, 故在默认视图一次性采集.
+        """
+        try:
+            data = await page.evaluate(_EXTRA_BLOCKS_JS)
+        except Exception:
+            return {}
+        return data or {}
 
     # ================================================================
     #  大运级联点击 (流年全量提取)
@@ -290,6 +405,7 @@ class WenzhenParser(ArticleParser):
         self,
         text: str,
         liunian_segments: Optional[List[Tuple[str, List[List[str]]]]] = None,
+        extra: Optional[Dict] = None,
     ) -> Dict:
         # 非空行视图 (保留顺序用于索引)
         lines = [ln.strip() for ln in text.split("\n")]
@@ -321,6 +437,28 @@ class WenzhenParser(ArticleParser):
         if shensha:
             parts.append("## 神煞\n")
             parts.append("- " + "、".join(shensha) + "\n")
+            parts.append("")
+
+        # ── 专业细盘附加块 (五行旺衰 / 调候用神 / 宫位映射 / 六亲社会 / 干支关系逐对) ──
+        extra = extra or {}
+        for _blk_md in (
+            self._fmt_wuxing(extra.get("wuxing")),
+            self._fmt_tiaohou(extra.get("tiaohou")),
+            self._fmt_gongwei(extra.get("gongwei")),
+            self._fmt_liuqin(extra.get("liuqin")),
+        ):
+            if _blk_md:
+                parts.append(_blk_md)
+                parts.append("")
+        # 干支关系: 天干留意/地支留意 (汇总) + 逐对
+        rel_md = self._parse_relations(nz)
+        _gz_rel_body = self._fmt_gz_rel_body(extra.get("gz_rel"))
+        if rel_md or _gz_rel_body:
+            parts.append("## 干支关系\n")
+            if rel_md:
+                parts.append(rel_md + "\n")
+            if _gz_rel_body:
+                parts.append(_gz_rel_body + "\n")
             parts.append("")
 
         # ── 大运 (含首个起始小运) ──
@@ -367,12 +505,6 @@ class WenzhenParser(ArticleParser):
             ))
             parts.append("")
 
-        # ── 干支关系 ──
-        rel_md = self._parse_relations(nz)
-        if rel_md:
-            parts.append("## 干支关系\n")
-            parts.append(rel_md + "\n")
-
         raw_text = "\n".join(parts)
 
         metadata: Dict = {"platform": self.platform}
@@ -382,6 +514,17 @@ class WenzhenParser(ArticleParser):
         metadata["liunian_segments"] = len(liunian_segments) if liunian_segments else 0
         metadata["liuyue_count"] = len(liuyue_rows)
         metadata["shensha_count"] = len(shensha)
+        metadata["wuxing_count"] = len(extra.get("wuxing") or [])
+        metadata["tiaohou"] = 1 if extra.get("tiaohou") else 0
+        _gw = extra.get("gongwei") or {}
+        metadata["gongwei_palaces"] = sum(
+            len(_r.get("gong", []))
+            for _s in (_gw.get("sections") or [])
+            for _r in _s.get("rows", [])
+        )
+        _lq = extra.get("liuqin") or {}
+        metadata["liuqin_sections"] = len(_lq.get("sections") or [])
+        metadata["gz_rel_count"] = len(extra.get("gz_rel") or [])
 
         return {
             "title": title,
@@ -748,6 +891,155 @@ class WenzhenParser(ArticleParser):
             content = re.split(r"[:：]", dz, 1)[-1].strip() if re.search(r"[:：]", dz) else dz
             out.append(f"**地支留意**：{content}")
         return "  \n".join(out)
+
+    # ----------------------------------------------------------------
+    #  专业细盘附加块渲染 (五行 / 调候 / 宫位 / 六亲 / 干支关系逐对)
+    # ----------------------------------------------------------------
+
+    def _fmt_wuxing(self, items: Optional[List[str]]) -> str:
+        """五行旺衰: 月令对应的 旺/相/休/囚/死."""
+        if not items:
+            return ""
+        return "## 五行旺衰\n- " + "、".join(items) + "\n"
+
+    def _fmt_tiaohou(self, th: Optional[Dict]) -> str:
+        """调候用神: 用神提示 + 本八字透出/暗藏."""
+        if not th:
+            return ""
+        lines: List[str] = []
+        title = (th.get("title") or "").strip()
+        tou = th.get("tou") or []
+        cang = th.get("cang") or []
+        full = (th.get("full") or "").strip()
+        if title:
+            lines.append(f"- **{title}**")
+        if tou:
+            lines.append(f"- 本八字透出：{'、'.join(tou)}")
+        if cang:
+            lines.append(f"- 本八字暗藏：{'、'.join(cang)}")
+        if not lines and full:
+            lines.append(f"- {full}")
+        if not lines:
+            return ""
+        return "## 调候用神\n" + "\n".join(lines) + "\n"
+
+    def _fmt_gongwei(self, gw: Optional[Dict]) -> str:
+        """宫位映射: 六宫 + 四柱干支对照."""
+        if not gw:
+            return ""
+        palaces: List[str] = []
+        pillar_titles: List[str] = []
+        gz_rows: List[List[str]] = []
+        for sec in (gw.get("sections") or []):
+            for row in sec.get("rows", []):
+                if row.get("gong"):
+                    palaces.extend(row["gong"])
+                if row.get("title"):
+                    pillar_titles = row["title"]
+                if row.get("gz"):
+                    gz_rows.append(row["gz"])
+        if not palaces and not pillar_titles:
+            full = (gw.get("full") or "").strip()
+            return f"## 宫位映射\n{full}\n" if full else ""
+        lines = ["## 宫位映射"]
+        if palaces:
+            lines.append("- **六宫**：" + "、".join(self._dedupe(palaces)))
+        if pillar_titles and gz_rows:
+            rows: List[List[str]] = []
+            for gzr in gz_rows:
+                if len(gzr) != len(pillar_titles):
+                    continue
+                if all(c in self._TIAN_GAN for c in gzr):
+                    label = "天干"
+                elif all(c in self._DI_ZHI for c in gzr):
+                    label = "地支"
+                else:
+                    label = "干支"
+                rows.append([label] + list(gzr))
+            if rows:
+                lines.append("")
+                lines.append(
+                    self._fmt_table(["四柱"] + list(pillar_titles), rows).rstrip("\n")
+                )
+        return "\n".join(lines) + "\n"
+
+    def _fmt_liuqin(self, lq: Optional[Dict]) -> str:
+        """六亲 / 社会关系: 按亲属关系/社会关系分段, 列关系词 + 十神."""
+        if not lq:
+            return ""
+        secs = lq.get("sections") or []
+        if not secs:
+            full = (lq.get("full") or "").strip()
+            return f"## 六亲 / 社会关系\n{full}\n" if full else ""
+        ss_labels = ["天干十神", "藏干十神"]
+        lines = ["## 六亲 / 社会关系"]
+        has_content = False
+        for sec in secs:
+            title = (sec.get("title") or "").strip()
+            gong_rows: List[List[str]] = []
+            ss_rows: List[List[str]] = []
+            for row in sec.get("rows", []):
+                if row.get("gong"):
+                    gong_rows.append(row["gong"])
+                if row.get("ss"):
+                    ss_rows.append(row["ss"])
+            if not gong_rows and not ss_rows:
+                continue
+            has_content = True
+            if title:
+                lines.append("")
+                lines.append(f"**{title}**")
+            for i, gr in enumerate(gong_rows):
+                lines.append(
+                    f"- {'详细' if i > 0 else '概括'}：{'、'.join(self._dedupe(gr))}"
+                )
+            for i, ssr in enumerate(ss_rows):
+                lbl = ss_labels[i] if i < len(ss_labels) else "十神"
+                lines.append(f"- {lbl}：{' '.join(ssr)}")
+        if not has_content:
+            full = (lq.get("full") or "").strip()
+            return f"## 六亲 / 社会关系\n{full}\n" if full else ""
+        return "\n".join(lines) + "\n"
+
+    def _fmt_gz_rel_body(self, items: Optional[List[Dict]]) -> str:
+        """干支关系逐对 (仅正文, 合并进「干支关系」节). 去重后按天干/地支分组."""
+        if not items:
+            return ""
+        seen = set()
+        tg_lines: List[str] = []
+        dz_lines: List[str] = []
+        for it in items:
+            rel = (it.get("rel") or "").strip()
+            gz = it.get("gz") or []
+            key = (rel, tuple(gz))
+            if key in seen:
+                continue
+            seen.add(key)
+            line = f"{rel} {'-'.join(gz)}".strip()
+            if not line:
+                continue
+            if gz and all(c in self._TIAN_GAN for c in gz):
+                tg_lines.append(line)
+            elif gz and all(c in self._DI_ZHI for c in gz):
+                dz_lines.append(line)
+            else:
+                tg_lines.append(line)
+        out: List[str] = []
+        if tg_lines:
+            out.append(f"- **天干（逐对）**：{'、'.join(tg_lines)}")
+        if dz_lines:
+            out.append(f"- **地支（逐对）**：{'、'.join(dz_lines)}")
+        return "\n".join(out)
+
+    @staticmethod
+    def _dedupe(items: List[str]) -> List[str]:
+        seen = set()
+        out = []
+        for x in items:
+            if x and x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
 
     # ================================================================
     #  helpers
