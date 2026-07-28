@@ -201,7 +201,7 @@ python -m urlparser transcribe audio.mp3 --engine funasr
 | 微信公众号 | 文章 | Cookie 认证，图片占位符替换 |
 | 小红书 | 笔记 | 访问适配 |
 | GitHub | 仓库/Issue | README/代码提取 |
-| 问真八字 (pcbz.iwzwh.com) | 命理排盘 | Parser-First 直通；专业细盘 17 类数据块；大运→流年→流月级联点击全量提取（大运13段·流年127行·流月457节气）；需登录 `python -m urlparser.cookies_manager login wenzhen` |
+| 问真八字 (pcbz.iwzwh.com) | 命理排盘 | Parser-First 直通；专业细盘 17 类数据块；大运→流年→流月级联点击全量提取（大运13段·流年127行·流月457节气）；持久化 profile 登录 `python -m urlparser.cookies_manager login wenzhen`；批量接口 `parse_all_records()` 通过 SubUser2 API 一次性提取全部记录页案例 URL（无需点击 DOM） |
 | 通用网页 | 文章 | 智能内容提取，视频平台触发转录 |
 
 ## 配置
