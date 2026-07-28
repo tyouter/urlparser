@@ -15,6 +15,7 @@ from .platforms import (
     WeixinParser,
     GithubParser,
     GenericParser,
+    WenzhenParser,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     'WeixinParser',
     'GithubParser',
     'GenericParser',
+    'WenzhenParser',
 ]

@@ -9,6 +9,7 @@ from .youtube import YoutubeParser
 from .weixin import WeixinParser
 from .github import GithubParser
 from .generic import GenericParser
+from .wenzhen import WenzhenParser
 
 __all__ = [
     'ZhihuParser',
@@ -17,5 +18,6 @@ __all__ = [
     'YoutubeParser',
     'WeixinParser',
     'GithubParser',
-    'GenericParser'
+    'GenericParser',
+    'WenzhenParser',
 ]

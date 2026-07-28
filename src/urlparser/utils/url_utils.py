@@ -66,6 +66,7 @@ def detect_platform(url: str) -> str:
         'dailymotion.com': 'dailymotion',
         'twitch.tv': 'twitch',
         'dribbble.com': 'dribbble',
+        'iwzwh.com': 'wenzhen',
     }
 
     for platform_domain, platform_name in platform_map.items():

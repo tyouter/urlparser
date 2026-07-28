@@ -17,6 +17,7 @@ from .platforms import (
     WeixinParser,
     GithubParser,
     GenericParser,
+    WenzhenParser,
 )
 
 
@@ -57,6 +58,7 @@ ParserRegistry.register(BilibiliParser)
 ParserRegistry.register(YoutubeParser)
 ParserRegistry.register(WeixinParser)
 ParserRegistry.register(GithubParser)
+ParserRegistry.register(WenzhenParser)
 ParserRegistry.register(GenericParser)
 
 

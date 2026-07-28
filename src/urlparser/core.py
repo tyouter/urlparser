@@ -513,7 +513,7 @@ class UrlParser:
         content_type = ContentType.VIDEO if is_vid else ContentType.ARTICLE
         platform_type = self._detect_platform_type(platform)
 
-        parser_first_platforms = {'xiaohongshu'}
+        parser_first_platforms = {'xiaohongshu', 'wenzhen'}
 
         if platform not in parser_first_platforms:
             from .fetcher.factory import FetcherFactory
