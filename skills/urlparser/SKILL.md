@@ -295,7 +295,7 @@ All interfaces MUST use standard output methods:
 | `platform` shows "default" instead of platform name | OPEN — generic path domain mapping（v3 既有缺陷） |
 | Video `content` = description only | BY DESIGN — no AI summarization yet |
 | `author` field contains biography text | **FIXED (v4 M4)** — `clean_author` 清洗 |
-| FunASR SenseVoiceSmall output without punctuation | SENSEVOICE_LIMITATION — needs model upgrade to Paraformer |
+| FunASR SenseVoiceSmall output without punctuation | **FIXED (v4)** — punc_model=ct-punc 标点恢复（不换主模型，失败自动降级无标点） |
 | `--resume` batch 断点续传 | TODO (M6+) — manifest 已交付，resume 未实现 |
 | 代理/SSRF 安全护栏 | TODO (M6+) — 架构文档 §8.5 规划 |
 | 本地离线结构化抽取档 | TODO (M6+) — M5 仅 DeepSeek API（D9） |

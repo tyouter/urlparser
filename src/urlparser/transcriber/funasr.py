@@ -34,7 +34,8 @@ SENSEVOICE_SPECIAL_TOKENS = re.compile(
 class FunASRTranscriber(BaseTranscriber):
     engine_name = "funasr"
 
-    def __init__(self, model_size: str = "large", device: str = "cuda", preloaded_model=None):
+    def __init__(self, model_size: str = "large", device: str = "cuda",
+                 preloaded_model=None, punc_model: str = "ct-punc"):
         self.model_size = model_size
         if device == "auto":
             try:
@@ -44,6 +45,7 @@ class FunASRTranscriber(BaseTranscriber):
                 device = "cpu"
         self.device = device
         self._model = preloaded_model  # v4 M3：经模型注册表注入常驻实例
+        self._punc_model = punc_model  # v4：标点恢复模型（Hermes brief，不换主模型）
         self._max_direct_duration = _DEFAULT_MAX_DIRECT_DURATION
         self._segment_duration = _DEFAULT_SEGMENT_DURATION
         self._batch_size_s = 300
@@ -147,15 +149,37 @@ class FunASRTranscriber(BaseTranscriber):
 
             model_name = model_map.get(self.model_size, model_map['large'])
 
-            logger.info("Loading FunASR model: %s", model_name)
+            logger.info("Loading FunASR model: %s (punc=%s)", model_name, self._punc_model)
 
-            self._model = AutoModel(
-                model=model_name,
-                device=self.device,
-                disable_update=True,
-                disable_pbar=True,
-
-            )
+            # v4：优先带标点恢复模型（ct-punc，输出带标点）；
+            # 加载失败（无网络/模型缺失）降级为无标点转录，不阻断主流程。
+            if not self._punc_model:
+                self._model = AutoModel(
+                    model=model_name,
+                    device=self.device,
+                    disable_update=True,
+                    disable_pbar=True,
+                )
+            else:
+                try:
+                    self._model = AutoModel(
+                        model=model_name,
+                        device=self.device,
+                        disable_update=True,
+                        disable_pbar=True,
+                        punc_model=self._punc_model,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "punc_model=%s 加载失败（%s），降级为无标点转录",
+                        self._punc_model, e,
+                    )
+                    self._model = AutoModel(
+                        model=model_name,
+                        device=self.device,
+                        disable_update=True,
+                        disable_pbar=True,
+                    )
 
         except ImportError:
             raise ImportError("funasr not installed. Install with: pip install funasr modelscope")
