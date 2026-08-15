@@ -17,8 +17,21 @@ from .frame_extractor import FrameExtractor
 from .vlm_engine import BaseVLMEngine, OpenVINOEngine, LlamaCppEngine
 
 # Import result types from parent to avoid circular imports
-from ..models import VisualFrameResult, ComprehensionResult
+from ..models import VisualFrameResult, ComprehensionResult, ProgressEvent, _emit_progress
 from ..utils.ffmpeg_utils import find_ffmpeg, find_ffprobe
+
+
+def _emit(on_progress, phase: str, message: str, percentage: float = 0.0, **extra):
+    """发射 comprehension 段进度事件（v4 四段契约），异常不影响主流程"""
+    if on_progress is None:
+        return
+    _emit_progress(on_progress, ProgressEvent(
+        stage="comprehension",
+        phase=phase,
+        message=message,
+        percentage=percentage,
+        extra=extra,
+    ))
 
 
 class ComprehensionPipeline:
@@ -38,7 +51,8 @@ class ComprehensionPipeline:
     def comprehend_from_url(
         self,
         url: str,
-        transcription_result=None
+        transcription_result=None,
+        on_progress=None,
     ) -> ComprehensionResult:
         """
         从 URL 执行视频理解。
@@ -46,6 +60,7 @@ class ComprehensionPipeline:
         Args:
             url: 视频 URL
             transcription_result: 已有的转录结果（用于合并时间轴）
+            on_progress: 可选进度回调（ProgressEvent → None）
 
         Returns:
             ComprehensionResult
@@ -54,6 +69,7 @@ class ComprehensionPipeline:
 
         # audio_only 模式：不下载/分析画面
         if mode == "audio_only":
+            _emit(on_progress, "done", "comprehension: audio_only 跳过画面", 95)
             return ComprehensionResult(
                 success=True,
                 mode="audio_only",
@@ -66,6 +82,7 @@ class ComprehensionPipeline:
 
         # 查找 ffmpeg
         ffmpeg_path = find_ffmpeg()
+        _emit(on_progress, "start", "comprehension: 开始视频理解", 72)
 
         try:
             # 1. 下载视频
@@ -74,6 +91,7 @@ class ComprehensionPipeline:
                 return ComprehensionResult(
                     success=False, mode=mode, error="视频下载失败"
                 )
+            _emit(on_progress, "progress", "comprehension: 视频下载完成", 78)
 
             # 2. 场景检测 + 关键帧提取
             scenes = FrameExtractor.detect_scenes(
@@ -84,6 +102,7 @@ class ComprehensionPipeline:
                 return ComprehensionResult(
                     success=False, mode=mode, error="未检测到有效场景"
                 )
+            _emit(on_progress, "progress", f"comprehension: 检测到 {len(scenes)} 个场景", 82)
 
             frames = FrameExtractor.extract_keyframes(
                 video_path, scenes, self._frame_dir,
@@ -94,6 +113,7 @@ class ComprehensionPipeline:
                 return ComprehensionResult(
                     success=False, mode=mode, error="关键帧提取失败"
                 )
+            _emit(on_progress, "progress", f"comprehension: 提取 {len(frames)} 帧", 86)
 
             # 3. 选择并加载 VLM
             hardware = detect_hardware()
@@ -101,9 +121,11 @@ class ComprehensionPipeline:
             model_path = resolve_model_path(model_id)
             self._vlm = self._create_engine(backend)
             self._vlm.load_model(model_path, device)
+            _emit(on_progress, "progress", f"comprehension: VLM 就绪 {backend.value}/{model_id}", 88)
 
             # 4. 批量分析
             descriptions = self._vlm.analyze_frames(frames)
+            _emit(on_progress, "progress", "comprehension: 帧分析完成", 92)
 
             # 5. 构建结果
             visual_frames = []

@@ -1,11 +1,11 @@
 ---
 name: urlparser
 description: Parse any URL to extract content, transcribe video/audio, and convert websites to structured data. Use when the user asks to parse, extract, read, or transcribe any URL, link, video, or webpage.
-version: "3.3.0"
+version: "4.0.0"
 license: MIT
 platforms: [macos, linux, windows]
 metadata:
-  version: "3.3.1"
+  version: "4.0.0"
   author: "KnowHow Team"
   repository: "https://github.com/tyouter/urlparser"
   hermes:
@@ -96,6 +96,49 @@ python -m urlparser transcribe-folder <directory>
 python -m urlparser video-info <url>
 ```
 
+### CLI v2 — 机器消费契约（v4）
+
+```bash
+# 快路径：仅元数据，不渲染不转录（秒级）
+python -m urlparser parse <url> --metadata-only --json
+# 强制策略 + 预算
+python -m urlparser parse <url> --strategy http --budget 30000 --json
+# 字段裁剪输出
+python -m urlparser parse <url> --json --fields title,content,author
+# stdin 批量 + manifest（机器消费）
+cat urls.txt | python -m urlparser parse-batch - --manifest manifest.json
+# daemon（常驻：浏览器/缓存复用）
+python -m urlparser daemon start|stop|status
+python -m urlparser job submit --url <url> --wait
+python -m urlparser job list|show|result|cancel <job_id>
+# 环境自检
+python -m urlparser doctor [--json] [--fix]
+# 站点级 URL 发现（sitemap + 列表页 → 供 parse-batch）
+python -m urlparser discover <url> -o urls.txt
+# 结构化抽取（填表，DeepSeek API，需 DEEPSEEK_API_KEY）
+python -m urlparser extract --url <url> --schema schema.json
+```
+
+退出码契约：`0` 全部成功 ｜ `1` 部分失败（批量）｜ `2` 参数错误 ｜ `3` 依赖缺失 ｜ `4` 全部失败 ｜ `5` 预算超时 ｜ `130` 中断。
+I/O 契约：stdout 仅结果（`--json` 为 Schema v1 JSON）；stderr 为日志与 `--progress` 进度事件（JSON-lines，四段 fetch/parse/transcribe/comprehension）。
+
+### MCP 接入（Claude Code / Hermes / Cursor，v4 M2）
+
+```json
+// .mcp.json（或 claude_desktop_config.json）
+{
+  "mcpServers": {
+    "urlparser": {
+      "command": "python",
+      "args": ["-m", "urlparser.mcp"]
+    }
+  }
+}
+```
+
+工具面（9 个）：`parse_url` / `parse_batch` / `transcribe` / `comprehend_video` / `get_job` / `cancel_job` / `cache_inspect` / `cache_invalidate` / `doctor`（`extract_structured` 随 M5 上线）。
+执行优先经 urlparserd（自动拉起、浏览器/缓存复用），daemon 不可用时自动降级进程内。
+
 ### Output to file
 
 ```bash
@@ -139,7 +182,7 @@ print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
 |----------|-------------|----------|
 | Bilibili | Video | **Forced transcription** (FunASR via API direct audio), metadata, subtitles |
 | Zhihu | Article/Answer | Full text extraction, cookie-based authenticated access |
-| WeChat | Article | Full text extraction, image placeholder |
+| WeChat | Article | Full text extraction, real image links (v4 M4) |
 | Xiaohongshu | Post/Video | API signature + Playwright fallback, video note detection |
 | YouTube | Video | **Forced transcription**, multi-language subtitles |
 | GitHub | Repository | README extraction |
@@ -243,16 +286,19 @@ All interfaces MUST use standard output methods:
 - **Markdown**: `result.to_markdown()` — do NOT hand-craft Markdown
 - **JSON**: `json.dumps(result.to_dict(), ensure_ascii=False, indent=2)` — do NOT hand-craft JSON
 
-### Known Defects (v3.3.1)
+### Known Defects (v4.0.0)
 
 | Defect | Status |
 |--------|--------|
 | `_extract_subtitles()` returns empty entries | OPEN — subtitle content download not implemented |
 | Timestamps all zero in subtitle mode | OPEN — depends on subtitle content download |
-| `platform` shows "default" instead of platform name | OPEN — bb_browser generic path domain mapping |
+| `platform` shows "default" instead of platform name | OPEN — generic path domain mapping（v3 既有缺陷） |
 | Video `content` = description only | BY DESIGN — no AI summarization yet |
-| `author` field contains biography text | OPEN — no text cleaning on author field |
+| `author` field contains biography text | **FIXED (v4 M4)** — `clean_author` 清洗 |
 | FunASR SenseVoiceSmall output without punctuation | SENSEVOICE_LIMITATION — needs model upgrade to Paraformer |
+| `--resume` batch 断点续传 | TODO (M6+) — manifest 已交付，resume 未实现 |
+| 代理/SSRF 安全护栏 | TODO (M6+) — 架构文档 §8.5 规划 |
+| 本地离线结构化抽取档 | TODO (M6+) — M5 仅 DeepSeek API（D9） |
 
 ## Pitfalls
 

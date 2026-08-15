@@ -68,6 +68,23 @@ def truncate_text(text: str, max_length: int = 500, suffix: str = "...") -> str:
     return text[:max_length - len(suffix)] + suffix
 
 
+def clean_author(name: str) -> str:
+    """清洗作者名（v4 M4：修复 author 混入简介文本缺陷）
+
+    - 取首行（简介通常从换行后开始）
+    - 去 emoji/不可见字符
+    - 超长（>30 字符）截断取前段
+    """
+    if not name:
+        return ""
+    name = name.split('\n')[0].strip()
+    name = re.sub(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F]+', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    if len(name) > 30:
+        name = name[:30].rstrip()
+    return name
+
+
 def count_words(text: str) -> int:
     if not text:
         return 0

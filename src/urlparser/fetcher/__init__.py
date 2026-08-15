@@ -16,6 +16,7 @@ from .user_chrome_fetcher import UserChromeFetcher
 from .browser_use_fetcher import BrowserUseFetcher
 from .bb_browser_fetcher import BbBrowserFetcher
 from .scrapling_fetcher import ScraplingFetcher
+from .http_fetcher import HttpFetcher
 from .factory import FetcherFactory
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     'BrowserUseFetcher',
     'BbBrowserFetcher',
     'ScraplingFetcher',
+    'HttpFetcher',
     'FetcherFactory',
 ]

@@ -13,6 +13,7 @@ from enum import Enum
 class FetchStrategy(Enum):
     """读取策略"""
     DIRECT = "direct"
+    HTTP = "http"
     COOKIE = "cookie"
     USER_CHROME = "user_chrome"
     BROWSER_USE = "browser_use"

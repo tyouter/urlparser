@@ -11,6 +11,8 @@ from datetime import datetime
 import time
 import json
 
+from .schema import SCHEMA_VERSION, StructuredError, TimingBreakdown
+
 
 class PlatformType(Enum):
     """平台类型"""
@@ -261,6 +263,15 @@ class ParseResult:
     retry_attempts: List[RetryAttempt] = field(default_factory=list)
     final_strategy: str = ""
 
+    # ── v4 Schema v1 契约字段 ──
+    schema_version: str = SCHEMA_VERSION
+    job_id: Optional[str] = None
+    timing: TimingBreakdown = field(default_factory=TimingBreakdown)
+    strategy_trace: List[str] = field(default_factory=list)
+    artifacts: Dict[str, Any] = field(default_factory=dict)
+    cache: Dict[str, Any] = field(default_factory=dict)
+    structured_error: Optional[StructuredError] = None
+
     @property
     def is_video(self) -> bool:
         return self.content_type == ContentType.VIDEO
@@ -315,9 +326,31 @@ class ParseResult:
             'metadata': self.metadata,
             'fetch_success': self.fetch_success,
             'error': self.error,
+            'error_detail': self._error_dict(),
             'parse_time': self.parse_time,
             'final_strategy': self.final_strategy,
             'retry_attempts': [a.to_dict() for a in self.retry_attempts],
+            # v4 Schema v1 契约字段
+            'schema_version': self.schema_version,
+            'job_id': self.job_id,
+            'timing': self.timing.to_dict(),
+            'strategy_trace': self.strategy_trace,
+            'artifacts': self.artifacts,
+            'cache': self.cache,
+        }
+
+    def _error_dict(self) -> Dict[str, Any]:
+        """结构化错误视图（v4 契约 §7.2）。
+
+        优先取 structured_error；v3 遗留的自由文本 error 以 code=None 形式呈现。
+        """
+        if self.structured_error is not None:
+            return self.structured_error.to_dict()
+        return {
+            'code': None,
+            'message': self.error or None,
+            'retryable': False,
+            'hint': None,
         }
 
     def to_markdown(self) -> str:
@@ -407,12 +440,24 @@ class ParseResult:
                 lines.append(line)
             lines.append("")
 
-        if self.error:
+        if self.error or self.structured_error:
             lines.append("## 错误信息")
-            lines.append(self.error)
+            if self.structured_error is not None and self.structured_error.code is not None:
+                retry_mark = "是" if self.structured_error.retryable else "否"
+                lines.append(f"> 错误码: {self.structured_error.code.value} | 可重试: {retry_mark}")
+            if self.error:
+                lines.append(self.error)
+            if self.structured_error is not None and self.structured_error.hint:
+                lines.append(f"> 提示: {self.structured_error.hint}")
             lines.append("")
 
         return '\n'.join(lines)
+
+
+def _clean_author_field(name: str) -> str:
+    """author 字段清洗（v4 M4），惰性导入避免循环依赖"""
+    from .utils.text_utils import clean_author
+    return clean_author(name)
 
 
 def create_result_from_parser(parser_result) -> ParseResult:
@@ -445,7 +490,7 @@ def create_result_from_parser(parser_result) -> ParseResult:
         title=getattr(parser_result, 'title', '') or '',
         content=getattr(parser_result, 'content', '') or '',
         raw_text=getattr(parser_result, 'raw_text', '') or '',
-        author=getattr(parser_result, 'author', '') or '',
+        author=_clean_author_field(getattr(parser_result, 'author', '') or ''),
         publish_date=getattr(parser_result, 'publish_date', '') or '',
         metadata=dict(getattr(parser_result, 'metadata', {}) or {}),
         fetch_success=getattr(parser_result, 'fetch_success', False),

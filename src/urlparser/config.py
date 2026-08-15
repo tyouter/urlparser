@@ -5,7 +5,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, List
 from pathlib import Path
 
 
@@ -188,6 +188,50 @@ class ParseConfig:
 # 用户可以直接从 config 模块访问
 from .batch_transcriber.processor import BatchTranscribeConfig
 
+
+@dataclass
+class ParseOptions:
+    """单次解析的运行时选项（v4：快路径/预算/策略控制，修复 C1/C2/C3）
+
+    mode: "full"=正文+转录+理解 | "content"=正文 | "metadata"=仅元数据（不渲染不转录）
+    strategy: None=auto 降级链 | "http"|"cffi"|"playwright"|"bb"|"cookie"|"user_chrome"|"browser_use"
+    budget_ms: 总时间预算（毫秒），0=不限；超时返回 E_BUDGET_EXCEEDED
+    """
+
+    mode: str = "full"
+    strategy: Optional[str] = None
+    budget_ms: int = 0
+
+
+def apply_fields(data: Dict[str, Any], fields: Optional[List[str]] = None) -> Dict[str, Any]:
+    """输出字段裁剪（v4 --fields）：始终保留 schema_version 与 url"""
+    if not fields:
+        return data
+    keep = set(fields) | {"schema_version", "url"}
+    return {k: v for k, v in data.items() if k in keep}
+
+
+def load_user_config(path: Optional[str] = None) -> Dict[str, Any]:
+    """读取 ~/.urlparser/config.toml（tomllib，Python 3.11+）；失败返回 {}"""
+    import os as _os
+
+    p = Path(path) if path else Path(_os.path.expanduser("~/.urlparser/config.toml"))
+    if not p.exists():
+        return {}
+    try:
+        import tomllib
+        with open(p, "rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        return {}
+
+
+def get_profile(data: Dict[str, Any], name: Optional[str]) -> Dict[str, Any]:
+    """从配置取 profile（[profiles.<name>]）"""
+    if not name or not data:
+        return {}
+    return dict((data.get("profiles") or {}).get(name) or {})
+
 __all__ = [
     'BrowserConfig',
     'ScrollConfig',
@@ -197,4 +241,8 @@ __all__ = [
     'RetryConfig',
     'ParseConfig',
     'BatchTranscribeConfig',
+    'ParseOptions',
+    'apply_fields',
+    'load_user_config',
+    'get_profile',
 ]

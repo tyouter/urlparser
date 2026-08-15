@@ -66,6 +66,11 @@ def create_parser() -> argparse.ArgumentParser:
     _add_transcribe_parser(subparsers)
     _add_transcribe_folder_parser(subparsers)
     _add_install_deps_parser(subparsers)
+    _add_daemon_parser(subparsers)
+    _add_job_parser(subparsers)
+    _add_doctor_parser(subparsers)
+    _add_discover_parser(subparsers)
+    _add_extract_parser(subparsers)
 
     return parser
 
@@ -93,6 +98,17 @@ def _add_parse_parser(subparsers):
     p.add_argument('--download-images', '-d', action='store_true', help='下载图片到本地')
     p.add_argument('--image-mode', default='local', choices=['local', 'base64'], help='图片保存方式：local=本地文件, base64=内嵌到Markdown')
     p.add_argument('--image-dir', help='图片保存目录（默认：./images）')
+    # v4 CLI v2 契约参数
+    p.add_argument('--json', action='store_true', help='输出 JSON（Schema v1，机器消费）')
+    p.add_argument('--fields', default=None, help='输出字段子集（逗号分隔，如 title,content）')
+    p.add_argument('--budget', type=int, default=None, help='总时间预算（毫秒）')
+    p.add_argument('--timeout', type=int, default=None, help='总超时（秒，等价 budget）')
+    p.add_argument('--strategy', default=None,
+                   choices=['http', 'cffi', 'playwright', 'bb', 'cookie', 'user_chrome', 'browser_use'],
+                   help='强制获取策略（v4 快路径：http 毫秒级）')
+    p.add_argument('--metadata-only', action='store_true', help='仅元数据：不渲染、不转录（快路径）')
+    p.add_argument('--profile', default=None, help='配置 profile（~/.urlparser/config.toml）')
+    p.add_argument('--standalone', action='store_true', help='不走 daemon，进程内解析')
 
 
 def _add_parse_batch_parser(subparsers):
@@ -105,8 +121,7 @@ def _add_parse_batch_parser(subparsers):
     p.add_argument('--concurrent', '-c', type=int, default=3, help='并发数')
     p.add_argument('--no-cache', action='store_true', help='跳过缓存')
     p.add_argument('--parse-mode', default='local', choices=['local', 'online'], help='解析模式')
-
-
+    p.add_argument('--manifest', default=None, help='输出 manifest.json（每 URL 状态/错误码，机器消费）')
 def _add_cache_parser(subparsers):
     p = subparsers.add_parser('cache', help='缓存管理')
     cache_sub = p.add_subparsers(dest='cache_command', help='缓存子命令')
@@ -209,9 +224,108 @@ def _add_install_deps_parser(subparsers):
                    help='仅检查，不安装')
 
 
+def _add_daemon_parser(subparsers):
+    """daemon 生命周期管理（v4 M1）"""
+    p = subparsers.add_parser('daemon', help='urlparserd 守护进程管理')
+    dsub = p.add_subparsers(dest='daemon_command', help='daemon 子命令')
+
+    dsub.add_parser('start', help='启动 daemon（后台静默）')
+    dsub.add_parser('stop', help='停止 daemon')
+    dsub.add_parser('status', help='daemon 状态')
+    prewarm_p = dsub.add_parser('prewarm', help='预热模型（M3 常驻）')
+    prewarm_p.add_argument('--models', default=None, help='逗号分隔模型 key（省略预热全部已注册）')
+
+    for sp in [dsub.choices.get('start'), dsub.choices.get('stop'), dsub.choices.get('status')]:
+        if sp is not None:
+            sp.add_argument('--port', type=int, default=None, help='端口（默认 47611）')
+
+
+def _add_job_parser(subparsers):
+    """daemon 作业管理（v4 M1）"""
+    p = subparsers.add_parser('job', help='urlparserd 作业管理')
+    jsub = p.add_subparsers(dest='job_command', help='job 子命令')
+
+    jsub.add_parser('list', help='列出作业')
+    show_p = jsub.add_parser('show', help='查看作业详情')
+    show_p.add_argument('job_id')
+    result_p = jsub.add_parser('result', help='查看作业结果')
+    result_p.add_argument('job_id')
+    cancel_p = jsub.add_parser('cancel', help='取消作业')
+    cancel_p.add_argument('job_id')
+    submit_p = jsub.add_parser('submit', help='提交解析作业（异步）')
+    submit_p.add_argument('--url', required=True)
+    submit_p.add_argument('--mode', default='full', choices=['metadata', 'content', 'full'])
+    submit_p.add_argument('--strategy', default=None)
+    submit_p.add_argument('--budget', type=int, default=None)
+    submit_p.add_argument('--wait', action='store_true', help='阻塞等待完成')
+
+
+def _add_doctor_parser(subparsers):
+    """环境自检（v4 任务 G）"""
+    p = subparsers.add_parser('doctor', help='环境自检')
+    p.add_argument('--json', action='store_true', help='JSON 输出')
+    p.add_argument('--fix', action='store_true', help='尝试自动修复依赖')
+
+
+def _add_discover_parser(subparsers):
+    """站点级 URL 发现（v4 M4 轻量版）"""
+    p = subparsers.add_parser('discover', help='站点级 URL 发现（sitemap + 列表页）')
+    p.add_argument('url', help='站点首页或列表页 URL')
+    p.add_argument('--max', type=int, default=50, help='最大 URL 数')
+    p.add_argument('--output', '-o', default=None, help='写出 urls.txt 供 parse-batch 使用')
+    p.add_argument('--json', action='store_true', help='JSON 输出')
+
+
+def _add_extract_parser(subparsers):
+    """LLM 结构化抽取（v4 M5 填表，决策 D9：DeepSeek API）"""
+    p = subparsers.add_parser('extract', help='结构化抽取（填表，DeepSeek API）')
+    p.add_argument('--url', default=None, help='单页 URL')
+    p.add_argument('--urls', nargs='*', default=None, help='多页 URL 列表')
+    p.add_argument('--schema', required=True, help='目标 JSON Schema 文件（含 properties）')
+    p.add_argument('--combine', default='merge', choices=['merge', 'each'])
+    p.add_argument('--model', default=None, help='DeepSeek 模型（默认 deepseek-chat）')
+
+
 async def cmd_parse(args):
+    """CLI v2: parse 单 URL。
+
+    契约：stdout 仅结果；stderr 日志与进度事件；返回退出码
+    （0 成功 / 2 参数 / 3 依赖缺失 / 4 失败 / 5 预算超时）。
+    默认走 daemon（自动拉起），--standalone 进程内执行。
+    """
     from .core import UrlParser
-    from .config import ParseConfig, TranscribeConfig, BrowserConfig, ComprehensionConfig, ImageDownloadConfig
+    from .config import (
+        ParseConfig, TranscribeConfig, BrowserConfig, ComprehensionConfig,
+        ImageDownloadConfig, ParseOptions, load_user_config, get_profile,
+    )
+
+    # profile 展开（用户级默认值；命令行显式参数优先）
+    profile_cfg = get_profile(load_user_config(), getattr(args, 'profile', None))
+    opts = ParseOptions(
+        mode=("metadata" if getattr(args, 'metadata_only', False)
+              else profile_cfg.get("mode", "full")),
+        strategy=getattr(args, 'strategy', None) or profile_cfg.get("strategy"),
+        budget_ms=(getattr(args, 'budget', None)
+                   or (args.timeout * 1000 if getattr(args, 'timeout', None) else None)
+                   or int(profile_cfg.get("budget_ms", 0) or 0)),
+    )
+
+    if not getattr(args, 'standalone', False):
+        try:
+            data = await _parse_via_daemon(args, opts)
+            results = (data.get("result") or {}).get("results") or []
+            if results:
+                _output_result_dict(results[0], args)
+                return _exit_code_from_result(results[0])
+            _output_result_dict({
+                "url": args.url, "fetch_success": False, "schema_version": "1.0",
+                "error": data.get("error") or "daemon 返回空结果",
+                "error_detail": {"code": None, "message": None,
+                                 "retryable": False, "hint": None},
+            }, args)
+            return 4
+        except Exception as e:
+            print(f"[daemon] 不可用，降级 standalone: {e}", file=sys.stderr)
 
     comp_config = None
     if args.comprehension:
@@ -234,11 +348,9 @@ async def cmd_parse(args):
     # Structured progress output to stderr (JSON-lines for watchdog consumption)
     on_progress = None
     if args.progress:
-        import sys
         def _progress_to_stderr(event):
             """Write structured progress event as JSON line to stderr."""
-            line = event.to_json_line()
-            print(line, file=sys.stderr, flush=True)
+            print(event.to_json_line(), file=sys.stderr, flush=True)
         on_progress = _progress_to_stderr
 
     config = ParseConfig(
@@ -265,20 +377,16 @@ async def cmd_parse(args):
         elif args.image_dir:
             parse_output_dir = args.image_dir
 
-        result = await parser.parse(args.url, force_refresh=args.no_cache, output_dir=parse_output_dir)
-
-        if args.format == 'json':
-            output = json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
-        else:
-            output = result.to_markdown()
-
-        if args.output:
-            output_path = Path(args.output)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(output, encoding='utf-8')
-            print(f"已保存到: {args.output}")
-        else:
-            print(output)
+        result = await parser.parse(
+            args.url,
+            force_refresh=args.no_cache,
+            output_dir=parse_output_dir,
+            mode=opts.mode,
+            strategy=opts.strategy,
+            budget_ms=opts.budget_ms,
+        )
+        _output_result_dict(result.to_dict(), args)
+        return _exit_code_from_result(result.to_dict())
 
 
 async def cmd_parse_batch(args):
@@ -286,12 +394,15 @@ async def cmd_parse_batch(args):
     from .config import ParseConfig, TranscribeConfig, BrowserConfig
     from .utils.file_utils import ensure_dir
 
-    urls = _extract_urls_from_file(args.file)
+    if getattr(args, 'file', None) == '-':
+        urls = _extract_urls_from_text(sys.stdin.read())
+    else:
+        urls = _extract_urls_from_file(args.file)
     if not urls:
-        print(f"未找到 URL，请检查文件: {args.file}")
-        return
+        print("未找到 URL", file=sys.stderr)
+        return 2
 
-    print(f"找到 {len(urls)} 个 URL")
+    print(f"找到 {len(urls)} 个 URL", file=sys.stderr)
 
     config = ParseConfig(
         transcribe=TranscribeConfig(
@@ -313,15 +424,32 @@ async def cmd_parse_batch(args):
         )
 
         success_count = sum(1 for r in results if r.fetch_success)
-        print(f"\n完成: {success_count}/{len(results)} 成功")
+        print(f"完成: {success_count}/{len(results)} 成功", file=sys.stderr)
 
         for result in results:
             if result.fetch_success:
                 file_path = output_dir / f"{result.platform}_{result.title[:30]}.md"
                 file_path.write_text(result.to_markdown(), encoding='utf-8')
-                print(f"  [OK] {result.title[:50]} -> {file_path}")
+                print(f"  [OK] {result.title[:50]} -> {file_path}", file=sys.stderr)
             else:
-                print(f"  [FAIL] {result.url[:50]}: {result.error}")
+                print(f"  [FAIL] {result.url[:50]}: {result.error}", file=sys.stderr)
+
+    if getattr(args, 'manifest', None):
+        manifest = [
+            {
+                "url": r.url,
+                "success": r.fetch_success,
+                "error": r.error,
+                "error_code": (r.to_dict().get("error_detail") or {}).get("code"),
+                "output_dir": str(output_dir),
+            }
+            for r in results
+        ]
+        Path(args.manifest).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8',
+        )
+
+    return 0 if success_count == len(results) else 1
 
 
 async def cmd_cache(args):
@@ -575,6 +703,230 @@ async def cmd_transcribe_folder(args):
         traceback.print_exc()
 
 
+# ══════════════════ v4 CLI v2 辅助（契约） ══════════════════
+
+def _extract_urls_from_text(text: str) -> List[str]:
+    urls = []
+    for line in (text or "").split("\n"):
+        line = line.strip()
+        if line.startswith("http"):
+            urls.append(line)
+    return list(dict.fromkeys(urls))
+
+
+def _exit_code_from_result(result_or_dict) -> int:
+    """退出码契约：0 成功 / 2 参数 / 3 依赖 / 4 失败 / 5 预算超时"""
+    d = result_or_dict if isinstance(result_or_dict, dict) else result_or_dict.to_dict()
+    if d.get("fetch_success"):
+        return 0
+    code = (d.get("error_detail") or {}).get("code")
+    if code == "E_BUDGET_EXCEEDED":
+        return 5
+    if code == "E_VALIDATION":
+        return 2
+    if code == "E_DEP_MISSING":
+        return 3
+    return 4
+
+
+def _result_dict_to_markdown(d: dict) -> str:
+    """daemon 路径的字典 → Markdown（与 ParseResult.to_markdown 结构一致）"""
+    lines = []
+    if d.get("title"):
+        lines.append(f"# {d['title']}")
+        lines.append("")
+    lines.append(f"> **来源**: {d.get('url', '')}")
+    lines.append(f"> **平台**: {d.get('platform', '')} | **类型**: {d.get('content_type', '')}")
+    if d.get("author"):
+        lines.append(f"> **作者**: {d['author']}")
+    if d.get("publish_date"):
+        lines.append(f"> **发布**: {d['publish_date']}")
+    if d.get("final_strategy"):
+        lines.append(f"> **解析策略**: {d['final_strategy']}")
+    lines.append("")
+    if d.get("content"):
+        lines.append(d["content"])
+        lines.append("")
+    tr = d.get("transcription") or {}
+    if tr.get("success") and tr.get("text"):
+        lines.append("## 语音转录")
+        lines.append("")
+        lines.append(tr["text"])
+        lines.append("")
+    if d.get("error"):
+        lines.append("## 错误信息")
+        lines.append(d["error"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _output_result_dict(d: dict, args):
+    """stdout 仅结果；--output 落盘时结果写文件、提示走 stderr"""
+    from .config import apply_fields
+
+    use_json = bool(getattr(args, 'json', False)) or getattr(args, 'format', 'markdown') == 'json'
+    if use_json:
+        fields = None
+        if getattr(args, 'fields', None):
+            fields = [f.strip() for f in str(args.fields).split(",") if f.strip()]
+        text = json.dumps(apply_fields(d, fields), ensure_ascii=False, indent=2)
+    else:
+        text = _result_dict_to_markdown(d)
+
+    if getattr(args, 'output', None):
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(text, encoding='utf-8')
+        print(f"已保存到: {args.output}", file=sys.stderr)
+    else:
+        print(text)
+
+
+async def _parse_via_daemon(args, opts) -> dict:
+    """提交到 urlparserd 并流式等待（进度事件 → stderr JSON-lines）"""
+    from .daemon.client import DaemonClient, DaemonError
+
+    client = DaemonClient()
+    if not await DaemonClient.ensure_started():
+        raise DaemonError("daemon 无法启动")
+
+    on_event = None
+    if getattr(args, 'progress', False):
+        def _ev(e):
+            print(json.dumps(e, ensure_ascii=False), file=sys.stderr, flush=True)
+        on_event = _ev
+
+    job_id = await client.submit("parse", {
+        "url": args.url,
+        "mode": opts.mode,
+        "strategy": opts.strategy,
+        "budget_ms": opts.budget_ms,
+        "retry": True,
+        "no_cache": bool(getattr(args, 'no_cache', False)),
+    })
+    return await client.subscribe(job_id, on_event=on_event)
+
+
+async def cmd_daemon(args):
+    """daemon start/stop/status"""
+    from .daemon.client import DaemonClient, DEFAULT_PORT
+
+    port = args.port or DEFAULT_PORT
+    if args.daemon_command == "start":
+        ok = await DaemonClient.ensure_started(port=port)
+        print(json.dumps({"daemon": "running", "port": port}, ensure_ascii=False) if ok
+              else json.dumps({"daemon": "failed", "port": port}, ensure_ascii=False))
+        return 0 if ok else 4
+    if args.daemon_command == "stop":
+        try:
+            client = DaemonClient(port=port)
+            await client.shutdown()
+            print(json.dumps({"daemon": "stopped"}, ensure_ascii=False))
+            return 0
+        except Exception as e:
+            print(f"stop failed: {e}", file=sys.stderr)
+            return 4
+    if args.daemon_command == "status":
+        running = await DaemonClient.is_running(port=port)
+        print(json.dumps({"daemon": "running" if running else "stopped", "port": port},
+                         ensure_ascii=False))
+        return 0 if running else 1
+    if args.daemon_command == "prewarm":
+        try:
+            client = DaemonClient(port=port)
+            models = ([m.strip() for m in args.models.split(",") if m.strip()]
+                      if getattr(args, 'models', None) else None)
+            data = await client.prewarm(models)
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+            return 0 if not data.get("failed") else 4
+        except Exception as e:
+            print(f"prewarm failed: {e}", file=sys.stderr)
+            return 4
+    return 2
+
+
+async def cmd_job(args):
+    """daemon 作业管理"""
+    from .daemon.client import DaemonClient
+
+    client = DaemonClient()
+    if args.job_command == "submit":
+        job_id = await client.submit("parse", {
+            "url": args.url, "mode": args.mode,
+            "strategy": args.strategy,
+            "budget_ms": args.budget or 0,
+        })
+        print(json.dumps({"job_id": job_id}, ensure_ascii=False))
+        if args.wait:
+            data = await client.wait(job_id)
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+            return 0 if data.get("status") == "succeeded" else 4
+        return 0
+    if args.job_command == "list":
+        jobs = await client.list_jobs()
+        print(json.dumps({"jobs": jobs}, ensure_ascii=False, indent=2))
+        return 0
+    if args.job_command == "show" or args.job_command == "result":
+        data = await client.result(args.job_id)
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+        return 0 if data.get("status") == "succeeded" else 1
+    if args.job_command == "cancel":
+        ok = await client.cancel(args.job_id)
+        print(json.dumps({"job_id": args.job_id, "cancelled": ok}, ensure_ascii=False))
+        return 0 if ok else 4
+    return 2
+
+
+def cmd_doctor(args):
+    """环境自检（委托 urlparser.doctor）"""
+    from .doctor import main as doctor_main
+
+    argv = []
+    if getattr(args, 'json', False):
+        argv.append('--json')
+    if getattr(args, 'fix', False):
+        argv.append('--fix')
+    return doctor_main(argv)
+
+
+async def cmd_discover(args):
+    """站点级 URL 发现（sitemap + 列表页）"""
+    from .site_crawl import discover_urls
+
+    data = await discover_urls(args.url, max_urls=args.max)
+    if args.output:
+        Path(args.output).write_text("\n".join(data["urls"]), encoding='utf-8')
+        print(json.dumps({"output": args.output, "count": len(data["urls"])},
+                         ensure_ascii=False))
+    elif args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        for u in data["urls"]:
+            print(u)
+    return 0
+
+
+async def cmd_extract(args):
+    """结构化抽取（填表，DeepSeek API，决策 D9）"""
+    from .extract import extract_structured
+
+    urls = list(args.urls or [])
+    if args.url:
+        urls.insert(0, args.url)
+    try:
+        schema = json.loads(Path(args.schema).read_text(encoding='utf-8'))
+        result = await extract_structured(
+            urls, schema,
+            model=args.model or "deepseek-chat",
+            combine=args.combine,
+        )
+    except Exception as e:
+        print(f"extract failed: {e}", file=sys.stderr)
+        return 4
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _extract_urls_from_file(file_path: str) -> List[str]:
     import re
 
@@ -613,17 +965,20 @@ async def cmd_install_deps(args):
         ensure_all_dependencies(auto_install=auto_install)
 
 
-def main():
+def main(argv=None):
     if sys.platform == 'win32':
         sys.stdout.reconfigure(encoding='utf-8')
         sys.stderr.reconfigure(encoding='utf-8')
 
     parser = create_parser()
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else 2
 
     if not args.command:
         parser.print_help()
-        return
+        return 0
 
     command_map = {
         'parse': cmd_parse,
@@ -634,14 +989,31 @@ def main():
         'transcribe': cmd_transcribe,
         'transcribe-folder': cmd_transcribe_folder,
         'install-deps': cmd_install_deps,
+        'daemon': cmd_daemon,
+        'job': cmd_job,
+        'doctor': cmd_doctor,
+        'discover': cmd_discover,
+        'extract': cmd_extract,
     }
 
     handler = command_map.get(args.command)
-    if handler:
-        asyncio.run(handler(args))
-    else:
+    if handler is None:
         parser.print_help()
+        return 2
+
+    # 退出码契约：0 成功 / 1 部分失败 / 2 参数 / 3 依赖 / 4 失败 / 5 预算 / 130 中断
+    try:
+        if asyncio.iscoroutinefunction(handler):
+            code = asyncio.run(handler(args))
+        else:
+            code = handler(args)
+        return int(code or 0)
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 4
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

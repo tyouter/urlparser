@@ -82,7 +82,7 @@ class ImageDownloader:
             img_url = self._normalize_url(img_url, base_url)
             
             # 下载或转换
-            replacement = self._process_image(img_url, alt_text, save_dir)
+            replacement = self._process_image(img_url, alt_text, save_dir, base_url)
             
             if replacement:
                 result_markdown = (
@@ -105,11 +105,12 @@ class ImageDownloader:
         
         return url
 
-    def _process_image(self, url: str, alt: str, save_dir: Path) -> Optional[str]:
+    def _process_image(self, url: str, alt: str, save_dir: Path,
+                       base_url: Optional[str] = None) -> Optional[str]:
         """处理单张图片"""
         try:
-            # 下载图片
-            img_data = self._download_image(url)
+            # 下载图片（带页面 Referer 防反盗链，v4 M4）
+            img_data = self._download_image(url, base_url)
             if not img_data:
                 return None
 
@@ -125,10 +126,14 @@ class ImageDownloader:
             logger.error(f"处理图片失败 {url}: {e}")
             return None
 
-    def _download_image(self, url: str) -> Optional[bytes]:
-        """下载图片"""
+    def _download_image(self, url: str, base_url: Optional[str] = None) -> Optional[bytes]:
+        """下载图片（Referer=页面地址，修复微信/知乎/小红书反盗链 403）"""
         try:
-            response = self.session.get(url, timeout=self.config.timeout, stream=True)
+            headers = {}
+            if base_url:
+                headers["Referer"] = base_url
+            response = self.session.get(url, timeout=self.config.timeout,
+                                        stream=True, headers=headers)
             response.raise_for_status()
             
             # 检查大小

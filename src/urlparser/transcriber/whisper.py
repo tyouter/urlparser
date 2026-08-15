@@ -23,10 +23,10 @@ class WhisperTranscriber(BaseTranscriber):
 
     engine_name = "whisper"
 
-    def __init__(self, model_size: str = "base", device: str = "auto"):
+    def __init__(self, model_size: str = "base", device: str = "auto", preloaded_model=None):
         self.model_size = model_size
         self.device = device
-        self._model = None
+        self._model = preloaded_model  # v4 M3：经模型注册表注入常驻实例
 
     @staticmethod
     def is_available() -> bool:

@@ -14,6 +14,7 @@ from .user_chrome_fetcher import UserChromeFetcher
 from .browser_use_fetcher import BrowserUseFetcher
 from .bb_browser_fetcher import BbBrowserFetcher
 from .scrapling_fetcher import ScraplingFetcher
+from .http_fetcher import HttpFetcher
 
 
 class FetcherFactory:
@@ -34,6 +35,7 @@ class FetcherFactory:
 
     _registry = {
         FetchStrategy.DIRECT: PlaywrightFetcher,
+        FetchStrategy.HTTP: HttpFetcher,
         FetchStrategy.COOKIE: CookieFetcher,
         FetchStrategy.USER_CHROME: UserChromeFetcher,
         FetchStrategy.BROWSER_USE: BrowserUseFetcher,

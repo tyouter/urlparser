@@ -18,6 +18,17 @@
 - **SKILL 集成** — Claude Code / Trae / Hermes 开箱即用，自然语言触发
 - **CLI + Python API** — 灵活使用方式
 
+### v4 能力（4.0.0）
+
+- **MCP 服务器** — `python -m urlparser.mcp`，10 工具面（parse_url/parse_batch/transcribe/comprehend_video/get_job/cancel_job/cache_inspect/cache_invalidate/doctor/extract_structured），Claude Code/Hermes 即插即用
+- **常驻守护进程 `urlparserd`** — 浏览器/缓存复用、作业提交/取消、进度事件流、重启恢复（`daemon start|stop|status|prewarm`）
+- **Schema v1 机器消费契约** — `schema_version` + 耗时分解 `timing` + 降级轨迹 `strategy_trace` + 结构化错误码 `error_detail`（10 码，每码带 retryable/hint）
+- **快路径** — `--metadata-only`（秒级元数据，零转录）、`--strategy http`（毫秒级 HTTP 快路径）、`--budget` 预算制（超时返回 E_BUDGET_EXCEEDED）
+- **四段进度事件** — fetch/parse/transcribe/comprehension 全覆盖，stderr JSON-lines
+- **算力常驻（M3）** — 模型注册表（keepalive/预热/显存预算/准入队列），FunASR/Whisper 常驻复用
+- **站点级图文提取（M4）** — 缩略图还原原图、反盗链 Referer、表格/代码块保留、author 清洗、`discover` sitemap+列表页 URL 发现
+- **LLM 结构化抽取（M5）** — DeepSeek API 填表：`extract --schema schema.json`（需 `DEEPSEEK_API_KEY`）
+
 ## 安装
 
 ```bash
@@ -189,6 +200,33 @@ python -m urlparser video-info https://www.bilibili.com/video/BVxxx
 
 # 音频转录
 python -m urlparser transcribe audio.mp3 --engine funasr
+```
+
+## CLI v2 契约（机器消费）
+
+```bash
+python -m urlparser parse <url> --metadata-only --json          # 快路径 + Schema v1 JSON
+python -m urlparser parse <url> --strategy http --budget 30000 --json
+python -m urlparser parse <url> --json --fields title,content,author
+cat urls.txt | python -m urlparser parse-batch - --manifest manifest.json
+python -m urlparser job submit --url <url> --wait
+python -m urlparser discover <url> -o urls.txt                  # 站点级 URL 发现
+python -m urlparser extract --url <url> --schema schema.json    # DeepSeek 填表
+python -m urlparser doctor [--json] [--fix]
+```
+
+退出码：`0` 全部成功 ｜ `1` 部分失败 ｜ `2` 参数错误 ｜ `3` 依赖缺失 ｜ `4` 全部失败 ｜ `5` 预算超时 ｜ `130` 中断。
+I/O：stdout 仅结果；stderr 为日志与 `--progress` 进度事件（JSON-lines 四段）。
+
+## MCP 接入
+
+```json
+// .mcp.json（Claude Code / Hermes / Cursor）
+{
+  "mcpServers": {
+    "urlparser": { "command": "python", "args": ["-m", "urlparser.mcp"] }
+  }
+}
 ```
 
 ## 支持平台

@@ -29,4 +29,5 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 from .cli import main
 
 if __name__ == '__main__':
-    main()
+    import sys
+    sys.exit(main())

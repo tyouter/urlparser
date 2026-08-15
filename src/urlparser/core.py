@@ -7,11 +7,13 @@
 """
 
 import asyncio
+import os
 import time
 from copy import deepcopy
 from typing import Optional, List, Dict, Any
 
-from .config import ParseConfig
+from .config import ParseConfig, ParseOptions
+from .schema import ErrorCode, make_error
 from .models import (
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult, RetryAttempt,
@@ -21,7 +23,33 @@ from .parser import ParserFactory
 from .parser.mixins.content_quality import ContentQualityMixin; from .models import _emit_progress  # noqa
 from .transcriber import FunASRTranscriber, WhisperTranscriber
 from .utils import detect_platform, is_video_url
+from .errors import classify_exception, classify_result_error
 from .comprehension import ComprehensionPipeline
+
+
+def _normalize_image_url(src: str) -> str:
+    """缩略图 URL 还原为原图（v4 M4：替换原先的缩略图删除策略）
+
+    - 剥离 `_w100/_h200/_s/_thumb/_small` 等缩略后缀
+    - 去除 imageMogr2 / imageView2 处理参数（小红书/微博类 CDN）
+    """
+    import re
+    from urllib.parse import urlparse, urlunparse
+
+    try:
+        parsed = urlparse(src)
+        path = parsed.path
+        base, ext = os.path.splitext(path)
+        m = re.match(r'^(.*?)(?:_w\d+|_h\d+|_s|_thumb|_small)$', base, re.I)
+        if m and ext:
+            path = m.group(1) + ext
+        query = re.sub(r'imageMogr2/[^&]*', '', parsed.query)
+        query = re.sub(r'imageView2/[^&]*', '', query)
+        query = query.strip('&')
+        return urlunparse((parsed.scheme, parsed.netloc, path,
+                           parsed.params, query, parsed.fragment))
+    except Exception:
+        return src
 
 
 class UrlParser:
@@ -51,6 +79,9 @@ class UrlParser:
         self._fetcher = None
         self._transcriber = None
         self._cache = None
+        # v4 daemon 浏览器复用（M1 MVP）：启用后同一实例跨请求复用 fetcher
+        self.enable_fetcher_reuse = False
+        self._shared_fetcher = None
         try:
             from .storage import ResultCache
             self._cache = ResultCache()
@@ -101,18 +132,52 @@ class UrlParser:
             cfg = deepcopy(cfg)
             cfg.browser.use_user_chrome = True
 
+        # v4 运行时选项（快路径/预算/策略控制）
+        opts = ParseOptions(
+            mode=kwargs.pop('mode', 'full'),
+            strategy=kwargs.pop('strategy', None),
+            budget_ms=kwargs.pop('budget_ms', 0),
+        )
+
         start_time = time.time()
 
         try:
-            if cfg.retry.enabled:
-                result = await self._parse_with_retry(url, cfg)
+            if opts.budget_ms > 0:
+                try:
+                    task = (
+                        self._parse_with_retry(url, cfg, opts)
+                        if cfg.retry.enabled else self._do_parse(url, cfg, opts)
+                    )
+                    result = await asyncio.wait_for(
+                        task, timeout=opts.budget_ms / 1000.0,
+                    )
+                except asyncio.TimeoutError:
+                    result = ParseResult(
+                        url=url,
+                        platform=detect_platform(url),
+                        fetch_success=False,
+                        error=f"budget exceeded ({opts.budget_ms}ms)",
+                        structured_error=make_error(
+                            ErrorCode.E_BUDGET_EXCEEDED,
+                            f"budget exceeded ({opts.budget_ms}ms)",
+                        ),
+                    )
+                    result.parse_time = round(time.time() - start_time, 2)
+                    return result
+            elif cfg.retry.enabled:
+                result = await self._parse_with_retry(url, cfg, opts)
             else:
-                result = await self._do_parse(url, cfg)
+                result = await self._do_parse(url, cfg, opts)
             result.parse_time = round(time.time() - start_time, 2)
+            result.timing.total_ms = round(result.parse_time * 1000, 1)
 
-            # 下载图片（如果启用）
+            # 下载图片（如果启用）——executor 异步化，不阻塞事件循环（v4 M4）
             if cfg.image_download.enabled:
-                result = UrlParser._download_images_in_content(result, cfg, output_dir)
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    UrlParser._download_images_in_content, result, cfg, output_dir,
+                )
 
             # Write to cache on success
             if result.fetch_success and self._cache:
@@ -129,10 +194,12 @@ class UrlParser:
                 platform="unknown",
                 fetch_success=False,
                 error=str(e),
+                structured_error=classify_exception(e, detect_platform(url)),
                 parse_time=round(time.time() - start_time, 2),
             )
 
-    async def _parse_with_retry(self, url: str, config: ParseConfig) -> ParseResult:
+    async def _parse_with_retry(self, url: str, config: ParseConfig,
+                                opts: Optional[ParseOptions] = None) -> ParseResult:
         """带多策略回退的解析流程"""
         platform = detect_platform(url)
         is_vid = is_video_url(url)
@@ -147,7 +214,7 @@ class UrlParser:
         # --- Attempt 1: auto_select fetcher -> fallback parser ---
         attempt_start = time.time()
         try:
-            result = await self._do_parse(url, config)
+            result = await self._do_parse(url, config, opts)
             elapsed = round(time.time() - attempt_start, 2)
 
             strategy_name = getattr(result, 'final_strategy', None) or 'auto'
@@ -164,6 +231,7 @@ class UrlParser:
 
                 if not blocked and quality_ok:
                     result.final_strategy = strategy_name
+                    result.strategy_trace = result.strategy_trace or [strategy_name]
                     result.retry_attempts = retry_attempts
                     return result
 
@@ -219,10 +287,16 @@ class UrlParser:
 
             attempt_start = time.time()
             try:
+                self._emit(config.on_progress, "fetch", "start",
+                           f"retry: {strategy_name}", 10, strategy=strategy_name)
                 fetch_result = await asyncio.wait_for(
                     strategy_fn(url, config),
                     timeout=config.retry.timeout_per_attempt,
                 )
+                self._emit(config.on_progress, "fetch", "done",
+                           f"retry: {strategy_name} done", 20,
+                           strategy=strategy_name,
+                           success=bool(fetch_result and fetch_result.success))
                 elapsed = round(time.time() - attempt_start, 2)
 
                 if not fetch_result or not fetch_result.success:
@@ -251,15 +325,26 @@ class UrlParser:
 
                 if not blocked and quality_ok:
                     candidate.final_strategy = strategy_name
+                    candidate.strategy_trace = [a.strategy for a in retry_attempts] + [strategy_name]
                     candidate.retry_attempts = retry_attempts
 
                     # Run transcription/comprehension if video
                     if is_vid and config.transcribe.enabled and candidate.fetch_success and not candidate.has_transcription:
+                        self._emit(config.on_progress, "transcribe", "start",
+                                   "transcribe: start", 50, platform=platform)
                         candidate.transcription = await self._transcribe_audio(url, config.transcribe, platform, config.on_progress)
+                        self._emit(config.on_progress, "transcribe", "done",
+                                   "transcribe: done", 65, platform=platform,
+                                   success=candidate.transcription.success)
                     if is_vid and config.comprehension.enabled and candidate.fetch_success:
+                        self._emit(config.on_progress, "comprehension", "start",
+                                   "comprehension: start", 70, platform=platform)
                         candidate.comprehension = await self._run_comprehension(
                             url, config.comprehension, candidate.transcription
                         )
+                        self._emit(config.on_progress, "comprehension", "done",
+                                   "comprehension: done", 95, platform=platform,
+                                   success=candidate.comprehension.success)
 
                     retry_attempts.append(RetryAttempt(
                         strategy=strategy_name,
@@ -325,6 +410,8 @@ class UrlParser:
             if hint:
                 result.error = (result.error or '') + '\n' + hint
 
+        result.structured_error = classify_result_error(result, retry_attempts)
+        result.strategy_trace = result.strategy_trace or [a.strategy for a in retry_attempts]
         return result
 
     async def _strategy_playwright_extended(self, url: str, config: ParseConfig):
@@ -505,7 +592,86 @@ class UrlParser:
         
         return result
 
-    async def _do_parse(self, url: str, config: ParseConfig) -> ParseResult:
+    @staticmethod
+    def _create_strategy_fetcher(strategy_name: str, fetch_config):
+        """按策略名创建 fetcher（v4 --strategy）；未知策略返回 None"""
+        from .fetcher.base import FetchStrategy
+        from .fetcher.factory import FetcherFactory
+
+        mapping = {
+            'http': FetchStrategy.HTTP,
+            'cffi': FetchStrategy.SCRAPLING,
+            'playwright': FetchStrategy.DIRECT,
+            'bb': FetchStrategy.BB_BROWSER,
+            'cookie': FetchStrategy.COOKIE,
+            'user_chrome': FetchStrategy.USER_CHROME,
+            'browser_use': FetchStrategy.BROWSER_USE,
+        }
+        s = mapping.get(strategy_name)
+        if s is None:
+            return None
+        try:
+            return FetcherFactory.create(fetch_config, strategy=s)
+        except Exception:
+            return None
+
+    async def _parse_metadata_only(self, url, config, platform, platform_type, content_type):
+        """快路径：仅元数据，不渲染、不转录（v4 mode=metadata，修复 C1）"""
+        self._emit(config.on_progress, "fetch", "start",
+                   "metadata: fast path", 5, strategy="metadata")
+        success = False
+        try:
+            if content_type == ContentType.VIDEO:
+                from .transcriber.video_info import extract_video_info
+                loop = asyncio.get_event_loop()
+                info = await loop.run_in_executor(None, lambda: extract_video_info(url))
+                result = ParseResult(
+                    url=url, platform=platform,
+                    platform_type=platform_type, content_type=content_type,
+                    title=info.get('title', ''),
+                    content=info.get('description', ''),
+                    author=info.get('author', ''),
+                    publish_date=info.get('publish_date_formatted', ''),
+                    video_metadata=VideoMetadata(
+                        duration=str(info.get('duration', '')),
+                        views=str(info.get('views', '')),
+                        likes=str(info.get('likes', '')),
+                        coins=str(info.get('coins', '')),
+                        favorites=str(info.get('favorites', '')),
+                        tags=str(info.get('tags', '')),
+                    ),
+                    metadata={'mode': 'metadata'},
+                    fetch_success=bool(info.get('fetch_success')),
+                    error=info.get('error'),
+                )
+            else:
+                from .fetcher.http_fetcher import HttpFetcher
+                fetch_config = config.to_fetch_config()
+                async with HttpFetcher(fetch_config) as fetcher:
+                    fr = await fetcher.fetch(url)
+                result = ParseResult(
+                    url=url, platform=platform,
+                    platform_type=platform_type, content_type=content_type,
+                    title=fr.title or '', content='',
+                    metadata={'mode': 'metadata'},
+                    fetch_success=fr.success,
+                    error=fr.error,
+                )
+
+            success = result.fetch_success
+            result.final_strategy = "metadata"
+            result.strategy_trace = ["metadata"]
+            if not result.fetch_success:
+                result.structured_error = classify_message(
+                    str(result.error or "metadata fetch failed"), platform,
+                )
+            return result
+        finally:
+            self._emit(config.on_progress, "fetch", "done",
+                       "metadata: done", 20, strategy="metadata", success=success)
+
+    async def _do_parse(self, url: str, config: ParseConfig,
+                        opts: Optional[ParseOptions] = None) -> ParseResult:
         """执行实际解析：auto_select fetcher -> fallback parser -> transcribe"""
         platform = detect_platform(url)
         is_vid = is_video_url(url)
@@ -513,48 +679,112 @@ class UrlParser:
         content_type = ContentType.VIDEO if is_vid else ContentType.ARTICLE
         platform_type = self._detect_platform_type(platform)
 
+        # v4 快路径：仅元数据，不渲染、不转录（修复 C1）
+        if opts is not None and opts.mode == "metadata":
+            return await self._parse_metadata_only(
+                url, config, platform, platform_type, content_type,
+            )
+
         parser_first_platforms = {'xiaohongshu', 'wenzhen'}
 
         if platform not in parser_first_platforms:
             from .fetcher.factory import FetcherFactory
             from .fetcher.base import FetchResult
 
-            fetch_config = config.to_fetch_config()
-            fetcher = FetcherFactory.auto_select(url, fetch_config)
+            reuse = bool(getattr(self, 'enable_fetcher_reuse', False)) and not (opts is not None and opts.strategy)
+            close_after = True
+            if reuse and self._shared_fetcher is not None:
+                fetcher = self._shared_fetcher
+                close_after = False
+            else:
+                fetch_config = config.to_fetch_config()
+                if opts is not None and opts.strategy:
+                    fetcher = self._create_strategy_fetcher(opts.strategy, fetch_config)
+                    if fetcher is None:
+                        return ParseResult(
+                            url=url, platform=platform,
+                            platform_type=platform_type, content_type=content_type,
+                            fetch_success=False,
+                            error=f"unknown strategy: {opts.strategy}",
+                            structured_error=make_error(
+                                ErrorCode.E_VALIDATION,
+                                f"unknown strategy: {opts.strategy}",
+                            ),
+                        )
+                else:
+                    fetcher = FetcherFactory.auto_select(url, fetch_config)
+                if reuse and fetcher is not None:
+                    self._shared_fetcher = fetcher
 
             if fetcher is not None:
+                fr = None
                 try:
+                    strategy = fetcher.strategy.value if fetcher.strategy else "auto"
+                    self._emit(config.on_progress, "fetch", "start",
+                               f"fetch: {strategy}", 5, strategy=strategy)
+                    fetch_t0 = time.time()
                     fr = await fetcher.fetch(url)
+                    fetch_ms = round((time.time() - fetch_t0) * 1000, 1)
+                    self._emit(config.on_progress, "fetch", "done",
+                               f"fetch: {strategy} done", 20,
+                               strategy=strategy, success=bool(fr and fr.success))
                     if fr and fr.success and fr.has_content:
                         result = self._fetch_result_to_parse_result(
                             fr, url, platform, platform_type, content_type
                         )
+                        result.timing.fetch_ms = fetch_ms
 
                         blocked = ContentQualityMixin.detect_access_restriction(
                             platform, result.title, result.content
                         )
                         if not blocked:
                             if is_vid and result.fetch_success and not result.has_transcription:
+                                self._emit(config.on_progress, "transcribe", "start",
+                                           "transcribe: start", 50, platform=platform)
+                                tr_t0 = time.time()
                                 result.transcription = await self._transcribe_audio(url, config.transcribe, platform, config.on_progress)
+                                result.timing.transcribe_ms = round((time.time() - tr_t0) * 1000, 1)
+                                self._emit(config.on_progress, "transcribe", "done",
+                                           "transcribe: done", 65, platform=platform,
+                                           success=result.transcription.success)
                             if is_vid and config.comprehension.enabled and result.fetch_success:
+                                self._emit(config.on_progress, "comprehension", "start",
+                                           "comprehension: start", 70, platform=platform)
+                                comp_t0 = time.time()
                                 result.comprehension = await self._run_comprehension(
                                     url, config.comprehension, result.transcription
                                 )
+                                result.timing.comprehension_ms = round((time.time() - comp_t0) * 1000, 1)
+                                self._emit(config.on_progress, "comprehension", "done",
+                                           "comprehension: done", 95, platform=platform,
+                                           success=result.comprehension.success)
                             result.final_strategy = fetcher.strategy.value
+                            result.strategy_trace = [fetcher.strategy.value]
                             return result
                 except Exception:
                     pass
                 finally:
-                    try:
-                        await fetcher.close()
-                    except Exception:
-                        pass
+                    # 复用模式下仅在失败时关闭（daemon 浏览器复用 MVP；成功保持实例存活）
+                    if close_after or fr is None or not fr.success:
+                        if self._shared_fetcher is fetcher:
+                            self._shared_fetcher = None
+                        try:
+                            await fetcher.close()
+                        except Exception:
+                            pass
 
         parser_config = config.to_parser_config()
         parser = ParserFactory.create(url, config=parser_config)
 
         try:
+            self._emit(config.on_progress, "parse", "start",
+                       f"parse: {parser.platform}", 25, platform=parser.platform)
+            parse_t0 = time.time()
             parse_result = await parser.fetch(url)
+            parse_ms = round((time.time() - parse_t0) * 1000, 1)
+            self._emit(config.on_progress, "parse", "done",
+                       f"parse: {parser.platform} done", 45,
+                       platform=parser.platform, success=parse_result.fetch_success)
 
             if not parse_result.fetch_success:
                 return ParseResult(
@@ -569,6 +799,7 @@ class UrlParser:
             result = create_result_from_parser(parse_result)
             result.platform_type = platform_type
             result.content_type = content_type
+            result.timing.parse_ms = parse_ms
 
             if result.metadata.get('note_type') == 'video':
                 result.content_type = ContentType.VIDEO
@@ -581,12 +812,26 @@ class UrlParser:
                 and not result.has_transcription
             )
             if needs_transcription:
+                self._emit(config.on_progress, "transcribe", "start",
+                           "transcribe: start", 50, platform=platform)
+                tr_t0 = time.time()
                 result.transcription = await self._transcribe_audio(url, config.transcribe, platform, config.on_progress)
+                result.timing.transcribe_ms = round((time.time() - tr_t0) * 1000, 1)
+                self._emit(config.on_progress, "transcribe", "done",
+                           "transcribe: done", 65, platform=platform,
+                           success=result.transcription.success)
 
             if is_vid and config.comprehension.enabled and result.fetch_success:
+                self._emit(config.on_progress, "comprehension", "start",
+                           "comprehension: start", 70, platform=platform)
+                comp_t0 = time.time()
                 comprehension = await self._run_comprehension(
                     url, config.comprehension, result.transcription
                 )
+                result.timing.comprehension_ms = round((time.time() - comp_t0) * 1000, 1)
+                self._emit(config.on_progress, "comprehension", "done",
+                           "comprehension: done", 95, platform=platform,
+                           success=comprehension.success)
                 result.comprehension = comprehension
 
             return result
@@ -897,7 +1142,10 @@ class UrlParser:
             pipeline = ComprehensionPipeline(config)
             c_result = await loop.run_in_executor(
                 None,
-                lambda: pipeline.comprehend_from_url(url, transcription_result),
+                lambda: pipeline.comprehend_from_url(
+                    url, transcription_result,
+                    on_progress=getattr(self.config, 'on_progress', None),
+                ),
             )
 
             # Convert to models.ComprehensionResult
@@ -918,6 +1166,20 @@ class UrlParser:
                 success=False,
                 error=str(e),
             )
+
+    @staticmethod
+    def _emit(on_progress, stage: str, phase: str, message: str,
+              percentage: float = 0.0, **extra):
+        """发射结构化进度事件（v4 四段契约），on_progress 异常不影响主流程"""
+        if on_progress is None:
+            return
+        _emit_progress(on_progress, ProgressEvent(
+            stage=stage,
+            phase=phase,
+            message=message,
+            percentage=percentage,
+            extra=extra,
+        ))
 
     @staticmethod
     def _detect_platform_type(platform: str) -> PlatformType:
@@ -1006,6 +1268,18 @@ class UrlParser:
                     include_images=True,
                 )
                 if traf_text and len(traf_text.strip()) > 100:
+                    # v4 M4：短正文再用 favor_recall 重试一次，保留链接/结构
+                    if len(traf_text.strip()) < 500:
+                        recall_text = trafilatura.extract(
+                            html,
+                            output_format='markdown',
+                            favor_recall=True,
+                            include_formatting=True,
+                            include_links=True,
+                            include_images=True,
+                        )
+                        if recall_text and len(recall_text.strip()) > len(traf_text.strip()):
+                            traf_text = recall_text
                     return traf_text
             except ImportError:
                 pass  # trafilatura not installed; fall through to existing path
@@ -1138,18 +1412,31 @@ class UrlParser:
                 img.decompose()
                 continue
             
-            # 检查文件名
-            path = urlparse(src).path
-            filename = unquote(path.split('/')[-1].lower())
-            bad_patterns = ['_w100', '_w200', '_h100', '_h200', '_s.png', '_s.jpg', '_thumb', '_small']
-            if any(pat in filename for pat in bad_patterns):
-                img.decompose()
-                continue
+            # 检查文件名（v4 M4：缩略图 URL 还原为原图，而非删除）
+            src = _normalize_image_url(src)
             
             seen_urls.add(src)
             alt = img.get('alt', '') or img.get('title', '')
             img.replace_with(f'\n\n![{alt}]({src})\n\n')
         
+        # 5.5 处理表格与代码块（v4 M4：保留结构）
+        for table in soup.find_all('table'):
+            rows = []
+            for tr in table.find_all('tr'):
+                cells = [td.get_text(strip=True) for td in tr.find_all(['td', 'th'])]
+                if cells:
+                    rows.append('| ' + ' | '.join(cells) + ' |')
+            if rows:
+                ncols = len(rows[0].split('|')) - 2
+                md_table = rows[0] + '\n' + '| ' + ' | '.join(['---'] * max(ncols, 1)) + ' |\n' + '\n'.join(rows[1:])
+                table.replace_with('\n\n' + md_table + '\n\n')
+            else:
+                table.decompose()
+
+        for pre in soup.find_all('pre'):
+            code = pre.get_text()
+            pre.replace_with(f'\n\n```\n{code}\n```\n\n')
+
         # 6. 处理标题
         for i in range(6, 0, -1):
             for h in soup.find_all(f'h{i}'):
@@ -1237,7 +1524,6 @@ class UrlParser:
         cutoff_keywords = [
             '特别声明',
             'Notice:',
-            '推荐',
             '### 精品有声',
             '### 好书精选',
             '凤凰V现场',
@@ -1370,6 +1656,12 @@ class UrlParser:
 
     async def close(self):
         """关闭解析器，释放资源"""
+        if self._shared_fetcher:
+            try:
+                await self._shared_fetcher.close()
+            except Exception:
+                pass
+            self._shared_fetcher = None
         if self._fetcher:
             try:
                 await self._fetcher.close()

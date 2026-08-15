@@ -305,7 +305,7 @@ class PlaywrightFetcher(BaseFetcher):
                     if (src && !src.startsWith('data:')) {
                         const span = document.createElement('span');
                         span.setAttribute('data-img-src', src);
-                        span.textContent = `[图片: ${alt || src.split('/').pop().split('?')[0].split('#')[0]}]`;
+                        span.textContent = `![${alt || ''}](${src})`;  // v4 M4：保留真实图片引用
                         img.replaceWith(span);
                     } else {
                         img.remove();

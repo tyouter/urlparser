@@ -34,7 +34,7 @@ SENSEVOICE_SPECIAL_TOKENS = re.compile(
 class FunASRTranscriber(BaseTranscriber):
     engine_name = "funasr"
 
-    def __init__(self, model_size: str = "large", device: str = "cuda"):
+    def __init__(self, model_size: str = "large", device: str = "cuda", preloaded_model=None):
         self.model_size = model_size
         if device == "auto":
             try:
@@ -43,7 +43,7 @@ class FunASRTranscriber(BaseTranscriber):
             except ImportError:
                 device = "cpu"
         self.device = device
-        self._model = None
+        self._model = preloaded_model  # v4 M3：经模型注册表注入常驻实例
         self._max_direct_duration = _DEFAULT_MAX_DIRECT_DURATION
         self._segment_duration = _DEFAULT_SEGMENT_DURATION
         self._batch_size_s = 300

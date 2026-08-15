@@ -95,13 +95,14 @@ _ensure_env()
 # =============================================================================
 
 from .core import parse, parse_batch, parse_sync, UrlParser
-from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ComprehensionConfig, ImageDownloadConfig, RetryConfig
+from .config import ParseConfig, BrowserConfig, ScrollConfig, TranscribeConfig, ComprehensionConfig, ImageDownloadConfig, RetryConfig, ParseOptions, apply_fields
 from .models import (
     ParseResult, PlatformType, ContentType,
     VideoMetadata, TranscriptionResult, ArticleMetadata,
     ComprehensionResult, VisualFrameResult, RetryAttempt, ProgressEvent,
     _emit_progress,
 )
+from .schema import SCHEMA_VERSION, ErrorCode, StructuredError, TimingBreakdown
 from .utils import (
     URLNormalizer, normalize_url, hash_url, detect_platform, is_video_url,
     clean_text, remove_duplicate_lines, extract_main_content,
@@ -168,6 +169,14 @@ except ImportError:
     pass
 
 try:
+    from .daemon import (
+        DaemonClient, DaemonServer, JobStore, Job, JobStatus,
+        DaemonError, DEFAULT_PORT,
+    )
+except ImportError:
+    pass
+
+try:
     from .dependency_installer import (
         ensure_dependency, ensure_all_dependencies,
         ensure_transcribe_dependencies, ensure_core_dependencies,
@@ -184,6 +193,8 @@ __all__ = [
     'UrlParser',
 
     'ParseConfig',
+    'ParseOptions',
+    'apply_fields',
     'BrowserConfig',
     'ScrollConfig',
     'TranscribeConfig',
@@ -203,6 +214,11 @@ __all__ = [
     'RetryAttempt',
     'ProgressEvent',
     '_emit_progress',
+
+    'SCHEMA_VERSION',
+    'ErrorCode',
+    'StructuredError',
+    'TimingBreakdown',
 
     'ImageDownloader',
 
@@ -258,6 +274,15 @@ __all__ = [
     'SegmentationConfig',
     'TranscriptionWriter',
     'WriterConfig',
+
+    # v4 daemon
+    'DaemonClient',
+    'DaemonServer',
+    'JobStore',
+    'Job',
+    'JobStatus',
+    'DaemonError',
+    'DEFAULT_PORT',
 
     'URLNormalizer',
     'normalize_url',
