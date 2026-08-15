@@ -104,6 +104,7 @@ v3 的 `parse/parse_batch/UrlParser/ParseConfig` 全部兼容；新增 `ParseOpt
 - **模型**：FunASR/Whisper 缓存目录由 `__init__.py` 预置（`MODELSCOPE_CACHE`/`HF_HOME`）；comprehension VLM 模型需放在 `{repo}/models/` 下（`comprehension/models.py` 的 `_MODEL_REGISTRY`）。
 - **daemon**：默认端口 `127.0.0.1:47611`，作业库 `~/.urlparser/daemon/jobs.db`（SQLite WAL，重启恢复 running→failed）；`daemon prewarm` 预热 ASR 模型。
 - **测试**：`pytest tests/framework -m "not integration"`（本机基线 220 passed；**数量随环境可选依赖浮动**——funasr/curl_cffi 等未装时对应测试 skip 属正常，非缺陷）；integration 标记的 P3/P4/P5 与 health_check 需要真实外网 + 浏览器。
+- **测试守卫原则（2026-08 固化）**：可选依赖缺失 → 测试必须 **SKIP 绝不 FAIL**。注意 lazy export 陷阱：`import funasr` 成功不代表依赖齐备，需实际 `from funasr import AutoModel`（触发 torch/modelscope 解析）才算守卫有效（`test_funasr_punc.py` 已按此修复）。
 - **运行环境**：仓库内 `.venv` 是**空壳占位**（无依赖，勿直接使用）；实际运行/测试环境为 Hermes venv（依赖齐全）。新维护者先 `pip install -e .` 或复用 Hermes venv。
 - **版本**：v4.0.0 已全量同步（pyproject.toml / `__version__` / SKILL×3 / README / MCP serverInfo）。
 - **隐私**：本次提交已审计——无密钥/路径/Cookie 泄露。注意 `docs/bilibili_412_bypass.md:92` 有一处历史遗留的本地绝对路径（非本次引入），建议清理。

@@ -8,13 +8,19 @@ punc_model="" 时完全跳过。
 
 import pytest
 
+# 守卫原则（v4 固化）：可选依赖缺失 → SKIP，绝不 FAIL。
+# 只查 funasr 不够：funasr 的 AutoModel 是 lazy export，
+# 首次访问才触发 import torch/modelscope；缺 torch 时 monkeypatch.setattr
+# 会 ImportError 导致 FAIL。因此守卫必须实际解析 AutoModel。
 try:
+    import torch  # noqa: F401
     import funasr  # noqa: F401
+    from funasr import AutoModel  # noqa: F401  # 触发 lazy export，验证依赖齐备
     HAS_FUNASR = True
 except ImportError:
     HAS_FUNASR = False
 
-pytestmark = pytest.mark.skipif(not HAS_FUNASR, reason="funasr not installed")
+pytestmark = pytest.mark.skipif(not HAS_FUNASR, reason="funasr/torch 依赖缺失")
 
 from urlparser.transcriber.funasr import FunASRTranscriber  # noqa: E402
 
