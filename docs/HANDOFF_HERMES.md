@@ -43,6 +43,8 @@ urlparser 从 v3.3.x（纯库 + CLI + Skill）升级到 **v4.0.0**，成为**本
 - 长任务（转录/理解）经 daemon 异步作业，`get_job`/`cancel_job` 管理；
 - `extract_structured` 需 `DEEPSEEK_API_KEY`（决策 D9，唯一云端依赖）。
 
+> Hermes 集成（2026-08 确认）：**同意挂到 Hermes config.yaml 的 `mcp_servers`**，此后 Hermes 直接调用 `mcp_urlparser_*` 工具（parse_url/parse_batch/transcribe/comprehend_video/extract_structured/get_job/cancel_job/cache_inspect/cache_invalidate/doctor），不再走 `python -m urlparser` 子进程。
+
 ### 2.2 CLI v2（脚本/管道）
 
 ```bash
@@ -83,8 +85,8 @@ v3 的 `parse/parse_batch/UrlParser/ParseConfig` 全部兼容；新增 `ParseOpt
 
 | # | 事项 | 建议优先级 |
 |---|---|---|
-| 1 | `--resume` 批量断点续传（manifest 已交付，resume 未实现） | 高 |
-| 2 | SSRF/代理安全护栏（架构文档 §8.5 已规划未实现） | 高（若 MCP 暴露给多 Agent） |
+| 1 | `--resume` 批量断点续传（manifest 已交付，resume 未实现；Hermes 认可排期） | 高 |
+| 2 | SSRF/代理安全护栏（架构文档 §8.5 已规划未实现） | 低（单 Agent 本地用不急；多 Agent / 对外暴露时提级） |
 | 3 | 缓存 TTL 参数、daemon 透传 `--cookies/--comprehension` | 中 |
 | 4 | 流水线重叠与跨任务动态批处理（M3 收窄项） | 中 |
 | 5 | 本地离线结构化抽取档（当前 `backend=local` 明确报错，仅 DeepSeek） | 低（D9 已定） |
@@ -101,7 +103,9 @@ v3 的 `parse/parse_batch/UrlParser/ParseConfig` 全部兼容；新增 `ParseOpt
 - **Windows**：所有子进程经 `_subprocess_win.run_nowindow` 静默；MCP/CLI 强制 UTF-8 stdout；`urlparser` 控制台脚本建议统一用 `python -m` 前缀。
 - **模型**：FunASR/Whisper 缓存目录由 `__init__.py` 预置（`MODELSCOPE_CACHE`/`HF_HOME`）；comprehension VLM 模型需放在 `{repo}/models/` 下（`comprehension/models.py` 的 `_MODEL_REGISTRY`）。
 - **daemon**：默认端口 `127.0.0.1:47611`，作业库 `~/.urlparser/daemon/jobs.db`（SQLite WAL，重启恢复 running→failed）；`daemon prewarm` 预热 ASR 模型。
-- **测试**：`pytest tests/framework -m "not integration"`（当前 216 passed）；integration 标记的 P3/P4/P5 与 health_check 需要真实外网 + 浏览器（沙箱内会因命名管道限制失败，属环境问题非代码问题）。
+- **测试**：`pytest tests/framework -m "not integration"`（本机基线 220 passed；**数量随环境可选依赖浮动**——funasr/curl_cffi 等未装时对应测试 skip 属正常，非缺陷）；integration 标记的 P3/P4/P5 与 health_check 需要真实外网 + 浏览器。
+- **运行环境**：仓库内 `.venv` 是**空壳占位**（无依赖，勿直接使用）；实际运行/测试环境为 Hermes venv（依赖齐全）。新维护者先 `pip install -e .` 或复用 Hermes venv。
+- **版本**：v4.0.0 已全量同步（pyproject.toml / `__version__` / SKILL×3 / README / MCP serverInfo）。
 - **隐私**：本次提交已审计——无密钥/路径/Cookie 泄露。注意 `docs/bilibili_412_bypass.md:92` 有一处历史遗留的本地绝对路径（非本次引入），建议清理。
 - **SKILL**：三份 `SKILL.md`（`skills/`、`.claude/`、`.trae/`）已同步至 4.0.0 且哈希一致；Hermes 侧走 `hermes skills install tyouter/urlparser` 或直接挂 MCP。
 

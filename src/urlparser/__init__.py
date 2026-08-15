@@ -319,4 +319,4 @@ __all__ = [
     'is_package_installed',
     'is_ffmpeg_installed',
 ]
-__version__ = '3.3.1'
+__version__ = '4.0.0'
