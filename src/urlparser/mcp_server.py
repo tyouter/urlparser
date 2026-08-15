@@ -38,7 +38,8 @@ TOOLS: List[Dict[str, Any]] = [
     _tool(
         "parse_url",
         "解析单个 URL 为结构化内容（Schema v1 JSON）。mode=metadata 为快路径（秒级、零转录）；"
-        "strategy=http 为毫秒级 HTTP 快路径；budget_ms 超时返回 E_BUDGET_EXCEEDED。",
+        "strategy=http 为毫秒级 HTTP 快路径；budget_ms 超时返回 E_BUDGET_EXCEEDED。"
+        "默认不含正文（防大 JSON）；需要正文时 include_content=true（截断至 max_content_chars）。",
         {
             "url": {"type": "string", "description": "目标 URL（http/https）"},
             "mode": {"type": "string", "enum": ["metadata", "content", "full"], "default": "full"},
@@ -46,15 +47,22 @@ TOOLS: List[Dict[str, Any]] = [
                          "description": "强制获取策略；省略则自动降级链"},
             "budget_ms": {"type": "integer", "description": "总时间预算（毫秒），0=不限"},
             "no_cache": {"type": "boolean", "default": False},
+            "include_content": {"type": "boolean", "default": False,
+                                "description": "需要正文时置 true：结果附加 content 字段（截断至 max_content_chars）"},
+            "max_content_chars": {"type": "integer", "default": 20000,
+                                  "description": "include_content 时的正文截断上限"},
         },
         ["url"],
     ),
     _tool(
         "parse_batch",
-        "批量解析 URL 列表，返回逐条 Schema v1 结果（含错误码）。",
+        "批量解析 URL 列表，返回逐条 Schema v1 结果（含错误码）。"
+        "include_content=true 时每条附带正文（截断至 max_content_chars）。",
         {
             "urls": {"type": "array", "items": {"type": "string"}},
             "concurrent": {"type": "integer", "default": 3},
+            "include_content": {"type": "boolean", "default": False},
+            "max_content_chars": {"type": "integer", "default": 20000},
         },
         ["urls"],
     ),
@@ -214,6 +222,9 @@ class McpServer:
             return await local_fn()
 
     async def _tool_parse_url(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        include_content = bool(args.get("include_content", False))
+        max_chars = int(args.get("max_content_chars", 20000))
+
         async def _local():
             from .core import UrlParser
             from .config import ParseConfig
@@ -226,7 +237,10 @@ class McpServer:
                     budget_ms=int(args.get("budget_ms", 0) or 0),
                     force_refresh=bool(args.get("no_cache", False)),
                 )
-                return {"results": [result.to_dict()]}
+                d = result.to_dict()
+                if include_content:
+                    d["content"] = (result.content or "")[:max_chars]
+                return {"results": [d]}
 
         data = await self._via_daemon("parse", {
             "url": args.get("url", ""),
@@ -234,11 +248,16 @@ class McpServer:
             "strategy": args.get("strategy"),
             "budget_ms": int(args.get("budget_ms", 0) or 0),
             "no_cache": bool(args.get("no_cache", False)),
+            "include_content": include_content,
+            "max_content_chars": max_chars,
         }, _local)
         results = data.get("results") or []
         return results[0] if results else {"error": "empty result"}
 
     async def _tool_parse_batch(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        include_content = bool(args.get("include_content", False))
+        max_chars = int(args.get("max_content_chars", 20000))
+
         async def _local():
             from .core import UrlParser
             from .config import ParseConfig
@@ -248,11 +267,19 @@ class McpServer:
                     args.get("urls", []),
                     concurrent=int(args.get("concurrent", 3)),
                 )
-                return {"results": [r.to_dict() for r in results]}
+                out = []
+                for r in results:
+                    d = r.to_dict()
+                    if include_content:
+                        d["content"] = (r.content or "")[:max_chars]
+                    out.append(d)
+                return {"results": out}
 
         data = await self._via_daemon("parse", {
             "urls": args.get("urls", []),
             "concurrent": int(args.get("concurrent", 3)),
+            "include_content": include_content,
+            "max_content_chars": max_chars,
         }, _local)
         return {"results": data.get("results") or []}
 

@@ -40,6 +40,7 @@ urlparser 从 v3.3.x（纯库 + CLI + Skill）升级到 **v4.0.0**，成为**本
 
 - 执行优先经 urlparserd（自动拉起、浏览器/缓存/模型复用），daemon 不可用自动降级进程内；
 - 结果 = Schema v1 JSON（`schema_version/timing/strategy_trace/error_detail`）；
+- **正文按需**：默认不含 `content`（防大 JSON）；`parse_url/parse_batch` 传 `include_content=true` 即附带正文（截断至 `max_content_chars`，默认 20000）。元数据探测用默认，要读正文再开开关，无需退回 CLI；
 - 长任务（转录/理解）经 daemon 异步作业，`get_job`/`cancel_job` 管理；
 - `extract_structured` 需 `DEEPSEEK_API_KEY`（决策 D9，唯一云端依赖）。
 

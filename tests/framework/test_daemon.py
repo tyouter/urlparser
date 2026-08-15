@@ -149,3 +149,32 @@ async def test_failed_job_surfaces_error():
         assert "boom" in (data["error"] or "")
     finally:
         await srv.stop()
+
+
+@pytest.mark.asyncio
+async def test_default_runner_include_content(monkeypatch):
+    """include_content=true 时结果附带截断正文；默认不含（防大 JSON，Hermes 反馈）"""
+    from urlparser.daemon.server import default_job_runner
+    from urlparser.models import ParseResult
+
+    class _FakeParser:
+        def __init__(self, cfg):
+            self.cfg = cfg
+            self.enable_fetcher_reuse = False
+
+        async def parse(self, url, **kwargs):
+            return ParseResult(url=url, title="T", content="x" * 3000,
+                               fetch_success=True)
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr("urlparser.core.UrlParser", _FakeParser)
+
+    data = await default_job_runner("parse", {
+        "url": "https://x", "include_content": True, "max_content_chars": 1000,
+    })
+    assert data["results"][0]["content"] == "x" * 1000
+
+    data2 = await default_job_runner("parse", {"url": "https://x"})
+    assert "content" not in data2["results"][0]

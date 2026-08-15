@@ -136,8 +136,9 @@ I/O 契约：stdout 仅结果（`--json` 为 Schema v1 JSON）；stderr 为日�
 }
 ```
 
-工具面（9 个）：`parse_url` / `parse_batch` / `transcribe` / `comprehend_video` / `get_job` / `cancel_job` / `cache_inspect` / `cache_invalidate` / `doctor`（`extract_structured` 随 M5 上线）。
+工具面（10 个）：`parse_url` / `parse_batch` / `transcribe` / `comprehend_video` / `get_job` / `cancel_job` / `cache_inspect` / `cache_invalidate` / `doctor` / `extract_structured`。
 执行优先经 urlparserd（自动拉起、浏览器/缓存复用），daemon 不可用时自动降级进程内。
+正文按需：`parse_url(url, include_content=true, max_content_chars=20000)` 才返回 `content` 字段（默认防大 JSON）。
 
 ### Output to file
 

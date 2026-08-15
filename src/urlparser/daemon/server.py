@@ -61,7 +61,13 @@ async def default_job_runner(op: str, payload: Dict[str, Any],
                 urls,
                 concurrent=int(payload.get("concurrent", 3)),
             )
-            return {"results": [r.to_dict() for r in results]}
+            out = []
+            for r in results:
+                d = r.to_dict()
+                if payload.get("include_content"):
+                    d["content"] = (r.content or "")[:int(payload.get("max_content_chars", 20000))]
+                out.append(d)
+            return {"results": out}
 
         if not url:
             raise ValueError("payload 缺少 url 或 urls")
@@ -73,7 +79,11 @@ async def default_job_runner(op: str, payload: Dict[str, Any],
             budget_ms=int(payload.get("budget_ms", 0)),
             force_refresh=bool(payload.get("no_cache", False)),
         )
-        return {"results": [result.to_dict()]}
+        d = result.to_dict()
+        # v4：include_content 时附带正文（截断防大响应；默认不含，防大 JSON）
+        if payload.get("include_content"):
+            d["content"] = (result.content or "")[:int(payload.get("max_content_chars", 20000))]
+        return {"results": [d]}
     finally:
         await parser.close()
 

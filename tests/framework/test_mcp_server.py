@@ -130,3 +130,14 @@ def test_tool_schemas_valid():
         props = t["inputSchema"]["properties"]
         for req in t["inputSchema"]["required"]:
             assert req in props
+
+
+def test_parse_url_schema_has_content_opt_in():
+    """Hermes 反馈缺口：parse_url 支持 include_content/max_content_chars"""
+    tool = next(t for t in TOOLS if t["name"] == "parse_url")
+    props = tool["inputSchema"]["properties"]
+    assert props["include_content"]["default"] is False
+    assert props["max_content_chars"]["default"] == 20000
+
+    batch = next(t for t in TOOLS if t["name"] == "parse_batch")
+    assert "include_content" in batch["inputSchema"]["properties"]
